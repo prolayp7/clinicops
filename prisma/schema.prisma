@@ -1,0 +1,63 @@
+// Phase 0: identity, roles and audit foundation only.
+// Domain modules (patients, appointments, clinical, billing, ...) are added in their own phases.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  DOCTOR
+  RECEPTIONIST
+  NURSE
+  LAB_TECHNICIAN
+  ACCOUNTANT
+  PATIENT
+}
+
+enum StaffStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+/// Staff-side identity, keyed by the Supabase Auth user id (auth.users.id).
+/// The patient portal account model is introduced in the patient-portal phase.
+model StaffProfile {
+  id         String      @id @db.Uuid
+  email      String      @unique
+  fullName   String
+  role       Role
+  status     StaffStatus @default(ACTIVE)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  archivedAt DateTime?
+
+  auditLogs AuditLog[]
+
+  @@index([role])
+  @@map("staff_profiles")
+}
+
+/// Append-only record of security-relevant actions. Never updated or deleted by application code.
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  actor      StaffProfile? @relation(fields: [actorId], references: [id])
+  actorRole  Role?
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
