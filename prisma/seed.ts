@@ -60,6 +60,7 @@ async function upsertAuthUser(supabase: SupabaseClient, email: string): Promise<
 }
 
 async function main() {
+  if (process.env.ALLOW_DEMO_SEED !== "true" || process.env.NODE_ENV === "production") throw new Error("Demo seeding requires ALLOW_DEMO_SEED=true in a non-production environment.");
   const supabase = createClient(
     requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
     requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
@@ -84,15 +85,14 @@ async function main() {
     console.log(`Seeded ${staff.role} — ${staff.email}`);
   }
 
-  console.log(`\nAll fictional accounts share the password: ${SEED_PASSWORD}`);
 }
 
 main()
   .then(async () => {
     await prisma.$disconnect();
   })
-  .catch(async (error) => {
-    console.error(error);
+  .catch(async () => {
+    console.error("Seed failed. Check staging configuration; sensitive provider errors are suppressed.");
     await prisma.$disconnect();
     process.exit(1);
   });

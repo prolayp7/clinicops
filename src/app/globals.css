@@ -1,12 +1,176 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Bridges shadcn's CSS variables (and DESIGN.md's own tokens) into Tailwind v4 utilities
+   (bg-primary, text-card-metric, rounded-card, ...). */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-navy-900: var(--navy-900);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-card: var(--radius-card-size);
+  --radius-control: var(--radius-control-size);
+
+  --font-sans: var(--font-sans);
+
+  /* DESIGN.md typography scale — pair with an explicit font-weight utility, e.g.
+     `text-page-title font-bold`. */
+  --text-page-title: 28px;
+  --text-page-title--line-height: 34px;
+  --text-section-title: 18px;
+  --text-section-title--line-height: 26px;
+  --text-card-metric: 26px;
+  --text-card-metric--line-height: 32px;
+  --text-body: 14px;
+  --text-body--line-height: 21px;
+  --text-table-header: 12px;
+  --text-table-header--line-height: 16px;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+}
+
+:root {
+  color-scheme: light;
+  --radius: 0.625rem;
+  --radius-card-size: 14px;
+  --radius-control-size: 10px;
+
+  /* DESIGN.md visual foundation */
+  --background: #f4f7f8; /* Canvas */
+  --foreground: #152536; /* Navy 900 */
+  --card: #ffffff; /* Surface */
+  --card-foreground: #152536;
+  --popover: #ffffff;
+  --popover-foreground: #152536;
+  --primary: #16818a; /* Primary 600 */
+  --primary-foreground: #ffffff;
+  --secondary: #dde5ea; /* Slate 200 */
+  --secondary-foreground: #152536;
+  --muted: #f4f7f8;
+  --muted-foreground: #526577; /* Slate 600 */
+  --accent: #ddf3f2; /* Primary 100 — selected rows / subtle highlights */
+  --accent-foreground: #152536;
+  --destructive: #c33e4a; /* Danger */
+  --destructive-foreground: #ffffff;
+  --success: #16865c;
+  --success-foreground: #ffffff;
+  --warning: #b77812;
+  --warning-foreground: #ffffff;
+  --info: #3478c8;
+  --info-foreground: #ffffff;
+  --border: #dde5ea;
+  --input: #dde5ea;
+  --ring: #16818a;
+  --navy-900: #152536;
+
+  --chart-1: #16818a;
+  --chart-2: #3478c8;
+  --chart-3: #16865c;
+  --chart-4: #b77812;
+  --chart-5: #c33e4a;
+
+  /* White sidebar per the Stitch reference: active item gets a teal fill, not a dark shell. */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #526577;
+  --sidebar-primary: #16818a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ddf3f2;
+  --sidebar-accent-foreground: #152536;
+  --sidebar-border: #dde5ea;
+  --sidebar-ring: #16818a;
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.75 0.1 195);
+  --primary-foreground: oklch(0.145 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.6 0.12 155);
+  --success-foreground: oklch(0.145 0 0);
+  --warning: oklch(0.7 0.15 75);
+  --warning-foreground: oklch(0.145 0 0);
+  --info: oklch(0.65 0.12 240);
+  --info-foreground: oklch(0.145 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --navy-900: oklch(0.205 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.145 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.75 0.1 195);
+  --sidebar-primary-foreground: oklch(0.145 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
 
 @layer base {
-  :root {
-    color-scheme: light;
+  * {
+    @apply border-border outline-ring/50;
   }
-
   body {
     @apply bg-background text-foreground font-sans text-body antialiased;
   }

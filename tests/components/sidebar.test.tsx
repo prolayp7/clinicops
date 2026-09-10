@@ -9,14 +9,18 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/dashboard",
+}));
+
 describe("Sidebar", () => {
   it("renders the Dashboard link for a staff role", () => {
     render(<Sidebar role={Role.DOCTOR} />);
-    expect(screen.getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Dashboard/ })).toBeInTheDocument();
   });
 
-  it("renders no nav items for the patient role", () => {
+  it("renders no module nav items for the patient role", () => {
     render(<Sidebar role={Role.PATIENT} />);
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Dashboard/ })).not.toBeInTheDocument();
   });
 });

@@ -7,6 +7,9 @@
 
 # testing
 /coverage
+/test-results
+/playwright-report
+/blob-report
 
 # next.js
 /.next/
@@ -42,4 +45,8 @@ next-env.d.ts
 
 # other folders
 /docs
+!/docs/
+/docs/*
+!/docs/release/
+!/docs/release/*.md
 .remember

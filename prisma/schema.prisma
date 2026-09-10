@@ -1,5 +1,12 @@
-// Phase 0: identity, roles and audit foundation only.
-// Domain modules (patients, appointments, clinical, billing, ...) are added in their own phases.
+// Phase 0: identity, roles and audit foundation.
+// Phase 1: clinic settings, departments, specializations and doctor profiles/availability.
+// Phase 2: patient registration, demographics and medical history foundation.
+// Phase 3: appointment booking, status workflow and reminder-job foundation.
+// Phase 4: consultation workspace (vitals, diagnosis, notes, plan) with amendment history.
+// Phase 5: medicine master, prescriptions and internal PDF generation.
+// Phase 6: lab-test catalog, orders, manual sample/result workflow and report access control.
+// Phase 7: self-pay billing — invoices, line items, payments, refunds and revenue summaries.
+// Phase 8: private documents, predefined reports and the lightweight patient portal.
 
 generator client {
   provider = "prisma-client-js"
@@ -27,8 +34,8 @@ enum StaffStatus {
   ARCHIVED
 }
 
-/// Staff-side identity, keyed by the Supabase Auth user id (auth.users.id).
-/// The patient portal account model is introduced in the patient-portal phase.
+/// Staff-side identity, keyed by the Supabase Auth user id (auth.users.id). Patients get a
+/// separate PatientAccount identity (see below) rather than a StaffProfile row.
 model StaffProfile {
   id         String      @id @db.Uuid
   email      String      @unique
@@ -39,7 +46,21 @@ model StaffProfile {
   updatedAt  DateTime    @updatedAt
   archivedAt DateTime?
 
-  auditLogs AuditLog[]
+  auditLogs                AuditLog[]
+  doctor                   Doctor?
+  appointmentStatusChanges AppointmentStatusHistory[]
+  consultationAmendments   ConsultationAmendment[]
+  consultationAttachments  ConsultationAttachment[]
+  labOrdersPlaced          LabOrder[]                 @relation("LabOrderOrderedBy")
+  labOrdersReviewed        LabOrder[]                 @relation("LabOrderReviewedBy")
+  labOrderStatusChanges    LabOrderStatusHistory[]
+  labResultsEntered        LabOrderItem[]
+  labReportsUploaded       LabReport[]
+  invoicesCreated          Invoice[]
+  paymentsRecorded         Payment[]
+  refundsRecorded          Refund[]
+  documentsUploaded        Document[]
+  patientAccountsCreated   PatientAccount[]
 
   @@index([role])
   @@map("staff_profiles")
@@ -47,17 +68,776 @@ model StaffProfile {
 
 /// Append-only record of security-relevant actions. Never updated or deleted by application code.
 model AuditLog {
-  id         String   @id @default(uuid()) @db.Uuid
-  actorId    String?  @db.Uuid
+  id         String        @id @default(uuid()) @db.Uuid
+  actorId    String?       @db.Uuid
   actor      StaffProfile? @relation(fields: [actorId], references: [id])
   actorRole  Role?
   action     String
   entityType String
   entityId   String?
   metadata   Json?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime      @default(now())
 
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+enum RecordStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum Weekday {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+/// Single-row clinic profile. Read via a fixed "default" id rather than a real singleton table
+/// constraint — simplest option that fits Prisma/Postgres without extra tooling.
+model ClinicSetting {
+  id           String   @id @default("default")
+  name         String
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  state        String
+  postalCode   String
+  country      String
+  phone        String
+  email        String
+  timezone     String // IANA timezone, e.g. "America/New_York"
+  currency     String // ISO 4217 code, e.g. "USD"
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("clinic_settings")
+}
+
+model Department {
+  id         String       @id @default(uuid()) @db.Uuid
+  name       String       @unique
+  status     RecordStatus @default(ACTIVE)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  archivedAt DateTime?
+
+  doctors Doctor[]
+
+  @@map("departments")
+}
+
+model Specialization {
+  id         String       @id @default(uuid()) @db.Uuid
+  name       String       @unique
+  status     RecordStatus @default(ACTIVE)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  archivedAt DateTime?
+
+  doctors Doctor[]
+
+  @@map("specializations")
+}
+
+/// Clinical directory entry for a doctor, one-to-one with the staff account they log in with.
+model Doctor {
+  id                   String       @id @default(uuid()) @db.Uuid
+  staffProfileId       String       @unique @db.Uuid
+  fullName             String
+  email                String
+  phone                String
+  photoUrl             String?
+  signatureStoragePath String?
+  licenseNumber        String       @unique
+  departmentId         String       @db.Uuid
+  specializationId     String       @db.Uuid
+  qualifications       String[]
+  consultationFeeCents Int
+  slotDurationMinutes  Int          @default(30)
+  status               RecordStatus @default(ACTIVE)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  archivedAt           DateTime?
+
+  staffProfile   StaffProfile         @relation(fields: [staffProfileId], references: [id])
+  department     Department           @relation(fields: [departmentId], references: [id])
+  specialization Specialization       @relation(fields: [specializationId], references: [id])
+  availability   DoctorAvailability[]
+  leaves         DoctorLeave[]
+  appointments   Appointment[]
+  consultations  Consultation[]
+  prescriptions  Prescription[]
+
+  @@index([departmentId])
+  @@index([specializationId])
+  @@index([status])
+  @@map("doctors")
+}
+
+/// Recurring weekly availability block. Overlap between blocks on the same day is rejected at
+/// the service layer rather than a DB exclusion constraint, to keep this phase's slice small.
+model DoctorAvailability {
+  id        String   @id @default(uuid()) @db.Uuid
+  doctorId  String   @db.Uuid
+  weekday   Weekday
+  startTime DateTime @db.Time
+  endTime   DateTime @db.Time
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId, weekday])
+  @@map("doctor_availability")
+}
+
+/// Blocked/leave date range during which the doctor is unavailable, regardless of weekly template.
+model DoctorLeave {
+  id        String   @id @default(uuid()) @db.Uuid
+  doctorId  String   @db.Uuid
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  reason    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId])
+  @@map("doctor_leaves")
+}
+
+enum Sex {
+  MALE
+  FEMALE
+  OTHER
+  UNKNOWN
+}
+
+/// A clinic patient. `patientId` is the immutable, human-readable identifier shown throughout
+/// the UI (e.g. PT-000001); `sequenceNumber` only exists to generate it once at creation time.
+/// `normalizedPhone`/`normalizedEmail` back the duplicate-detection check on registration.
+model Patient {
+  id                           String       @id @default(uuid()) @db.Uuid
+  patientId                    String       @unique
+  sequenceNumber               Int          @unique @default(autoincrement())
+  firstName                    String
+  lastName                     String
+  dateOfBirth                  DateTime     @db.Date
+  sex                          Sex
+  phone                        String
+  normalizedPhone              String
+  email                        String?
+  normalizedEmail              String?
+  addressLine1                 String?
+  addressLine2                 String?
+  city                         String?
+  state                        String?
+  postalCode                   String?
+  country                      String?
+  emergencyContactName         String?
+  emergencyContactPhone        String?
+  emergencyContactRelationship String?
+  photoUrl                     String?
+  allergies                    String[]
+  medicalHistory               String?
+  previousDiagnoses            String[]
+  currentMedications           String[]
+  status                       RecordStatus @default(ACTIVE)
+  createdAt                    DateTime     @default(now())
+  updatedAt                    DateTime     @updatedAt
+  archivedAt                   DateTime?
+
+  appointments  Appointment[]
+  consultations Consultation[]
+  prescriptions Prescription[]
+  labOrders     LabOrder[]
+  invoices      Invoice[]
+  documents     Document[]
+  account       PatientAccount?
+
+  @@index([normalizedPhone])
+  @@index([normalizedEmail])
+  @@index([lastName, firstName])
+  @@index([status])
+  @@map("patients")
+}
+
+enum AppointmentStatus {
+  REQUESTED
+  SCHEDULED
+  CONFIRMED
+  CHECKED_IN
+  WAITING
+  IN_CONSULTATION
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum AppointmentSource {
+  STAFF_BOOKED
+  WALK_IN
+  ONLINE_REQUEST
+}
+
+/// A booked slot for a patient with a doctor. `startTime`/`endTime` are copied from the
+/// doctor's slot duration at booking time so a later change to that default doesn't retroactively
+/// resize existing appointments. Status changes go through `statusHistory`; reschedules are
+/// recorded as an AuditLog event (old/new date+time) rather than a second history table.
+model Appointment {
+  id        String            @id @default(uuid()) @db.Uuid
+  patientId String            @db.Uuid
+  doctorId  String            @db.Uuid
+  date      DateTime          @db.Date
+  startTime DateTime          @db.Time
+  endTime   DateTime          @db.Time
+  reason    String
+  status    AppointmentStatus @default(SCHEDULED)
+  source    AppointmentSource @default(STAFF_BOOKED)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  patient       Patient                    @relation(fields: [patientId], references: [id])
+  doctor        Doctor                     @relation(fields: [doctorId], references: [id])
+  statusHistory AppointmentStatusHistory[]
+  reminder      AppointmentReminder?
+  consultation  Consultation?
+
+  @@index([doctorId, date])
+  @@index([patientId])
+  @@index([status])
+  @@map("appointments")
+}
+
+/// Append-only log of status transitions for one appointment, each with the reason given
+/// (required for cancel/no-show) and who made the change.
+model AppointmentStatusHistory {
+  id            String             @id @default(uuid()) @db.Uuid
+  appointmentId String             @db.Uuid
+  fromStatus    AppointmentStatus?
+  toStatus      AppointmentStatus
+  reason        String?
+  changedById   String?            @db.Uuid
+  createdAt     DateTime           @default(now())
+
+  appointment Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  changedBy   StaffProfile? @relation(fields: [changedById], references: [id])
+
+  @@index([appointmentId])
+  @@map("appointment_status_history")
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+/// A queued reminder job for one appointment. Dispatch is provider-neutral (see
+/// EmailReminderSender in the reminder service) — no paid email/SMS integration is wired up yet;
+/// a future scheduled task would call the service's `processDueReminders` to send these.
+model AppointmentReminder {
+  id            String         @id @default(uuid()) @db.Uuid
+  appointmentId String         @unique @db.Uuid
+  scheduledFor  DateTime
+  status        ReminderStatus @default(PENDING)
+  sentAt        DateTime?
+  createdAt     DateTime       @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledFor])
+  @@map("appointment_reminders")
+}
+
+enum ConsultationStatus {
+  DRAFT
+  COMPLETED
+}
+
+/// One clinical encounter tied 1:1 to an Appointment. Vitals and clinical fields are editable
+/// while DRAFT; once COMPLETED they are frozen and further changes must go through
+/// ConsultationAmendment (see `amendConsultation` in the service) rather than a silent update.
+model Consultation {
+  id            String             @id @default(uuid()) @db.Uuid
+  appointmentId String             @unique @db.Uuid
+  patientId     String             @db.Uuid
+  doctorId      String             @db.Uuid
+  status        ConsultationStatus @default(DRAFT)
+
+  // Vitals
+  bloodPressureSystolic   Int?
+  bloodPressureDiastolic  Int?
+  pulseBpm                Int?
+  temperatureCelsius      Float?
+  respiratoryRate         Int?
+  oxygenSaturationPercent Int?
+  heightCm                Float?
+  weightKg                Float?
+
+  // Clinical
+  symptoms      String?
+  diagnosis     String?
+  clinicalNotes String?
+  treatmentPlan String?
+  followUpDate  DateTime? @db.Date
+
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  appointment  Appointment              @relation(fields: [appointmentId], references: [id])
+  patient      Patient                  @relation(fields: [patientId], references: [id])
+  doctor       Doctor                   @relation(fields: [doctorId], references: [id])
+  amendments   ConsultationAmendment[]
+  attachments  ConsultationAttachment[]
+  prescription Prescription?
+  labOrders    LabOrder[]
+  invoiceItems InvoiceItem[]
+  documents    Document[]
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([status])
+  @@map("consultations")
+}
+
+/// Append-only record of a reasoned change to a COMPLETED consultation. `snapshot` captures the
+/// field values as they were immediately before this amendment, and `changedFields` names which
+/// fields the amendment actually touched — both purely for audit/history display.
+model ConsultationAmendment {
+  id             String   @id @default(uuid()) @db.Uuid
+  consultationId String   @db.Uuid
+  reason         String
+  changedFields  String[]
+  snapshot       Json
+  amendedById    String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  consultation Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  amendedBy    StaffProfile @relation(fields: [amendedById], references: [id])
+
+  @@index([consultationId])
+  @@map("consultation_amendments")
+}
+
+/// A file attached to a consultation. `documentId` is reserved for linking into the Phase 8
+/// Document library once it exists; it has no FK yet since that model doesn't exist.
+model ConsultationAttachment {
+  id             String   @id @default(uuid()) @db.Uuid
+  consultationId String   @db.Uuid
+  documentId     String?  @db.Uuid
+  fileName       String
+  storagePath    String
+  mimeType       String
+  sizeBytes      Int
+  uploadedById   String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  consultation Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  uploadedBy   StaffProfile @relation(fields: [uploadedById], references: [id])
+
+  @@index([consultationId])
+  @@map("consultation_attachments")
+}
+
+/// Clinic medicine catalog entry used as the autocomplete source for prescription items.
+model Medicine {
+  id         String       @id @default(uuid()) @db.Uuid
+  name       String
+  strength   String
+  form       String
+  status     RecordStatus @default(ACTIVE)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  archivedAt DateTime?
+
+  items PrescriptionItem[]
+
+  @@unique([name, strength, form])
+  @@index([status])
+  @@map("medicines")
+}
+
+enum PrescriptionStatus {
+  DRAFT
+  ISSUED
+}
+
+enum MealInstruction {
+  BEFORE_MEAL
+  AFTER_MEAL
+  WITH_MEAL
+  EMPTY_STOMACH
+  NOT_APPLICABLE
+}
+
+/// A prescription header. `prescriptionNumber` is the immutable, human-readable identifier
+/// (e.g. RX-000001), generated the same way as Patient.patientId. DRAFT prescriptions are fully
+/// editable by the assigned doctor or an admin; once ISSUED they are frozen — see
+/// `isPrescriptionEditable` in the service. Optionally linked back to the consultation it was
+/// written from.
+model Prescription {
+  id                 String             @id @default(uuid()) @db.Uuid
+  prescriptionNumber String             @unique
+  sequenceNumber     Int                @unique @default(autoincrement())
+  patientId          String             @db.Uuid
+  doctorId           String             @db.Uuid
+  consultationId     String?            @unique @db.Uuid
+  status             PrescriptionStatus @default(DRAFT)
+  notes              String?
+  issuedAt           DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  patient      Patient            @relation(fields: [patientId], references: [id])
+  doctor       Doctor             @relation(fields: [doctorId], references: [id])
+  consultation Consultation?      @relation(fields: [consultationId], references: [id])
+  items        PrescriptionItem[]
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([status])
+  @@map("prescriptions")
+}
+
+/// One medicine line on a prescription. Dosage/frequency/route/duration are free text (clinical
+/// shorthand varies too much for a fixed enum) while meal timing is a small closed set.
+model PrescriptionItem {
+  id              String          @id @default(uuid()) @db.Uuid
+  prescriptionId  String          @db.Uuid
+  medicineId      String          @db.Uuid
+  dosage          String
+  frequency       String
+  route           String
+  duration        String
+  mealInstruction MealInstruction @default(NOT_APPLICABLE)
+  directions      String?
+  sortOrder       Int             @default(0)
+  createdAt       DateTime        @default(now())
+
+  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  medicine     Medicine     @relation(fields: [medicineId], references: [id])
+
+  @@index([prescriptionId])
+  @@map("prescription_items")
+}
+
+/// Clinic lab-test catalog entry. `priceCents` and `referenceRangeText` are the defaults copied
+/// onto each LabOrderItem at order/result time so a later catalog change never rewrites history.
+model LabTest {
+  id                 String       @id @default(uuid()) @db.Uuid
+  name               String
+  category           String
+  priceCents         Int
+  unit               String
+  referenceRangeText String
+  status             RecordStatus @default(ACTIVE)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  archivedAt         DateTime?
+
+  items LabOrderItem[]
+
+  @@unique([name, category])
+  @@index([status])
+  @@map("lab_tests")
+}
+
+enum LabOrderStatus {
+  ORDERED
+  SAMPLE_COLLECTED
+  PROCESSING
+  COMPLETED
+  REVIEWED
+  CANCELLED
+}
+
+/// One lab order for a patient, one-to-many with the tests ordered. `reviewedAt`/`reviewedById`
+/// are kept as direct fields (rather than only in statusHistory) because they gate patient-portal
+/// visibility — "released" in the product spec means status === REVIEWED. Every other transition
+/// timestamp lives only in LabOrderStatusHistory, mirroring the Appointment/Consultation pattern.
+model LabOrder {
+  id             String         @id @default(uuid()) @db.Uuid
+  orderNumber    String         @unique
+  sequenceNumber Int            @unique @default(autoincrement())
+  patientId      String         @db.Uuid
+  consultationId String?        @db.Uuid
+  orderedById    String         @db.Uuid
+  status         LabOrderStatus @default(ORDERED)
+  reviewedAt     DateTime?
+  reviewedById   String?        @db.Uuid
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  patient       Patient                 @relation(fields: [patientId], references: [id])
+  consultation  Consultation?           @relation(fields: [consultationId], references: [id])
+  orderedBy     StaffProfile            @relation("LabOrderOrderedBy", fields: [orderedById], references: [id])
+  reviewedBy    StaffProfile?           @relation("LabOrderReviewedBy", fields: [reviewedById], references: [id])
+  items         LabOrderItem[]
+  statusHistory LabOrderStatusHistory[]
+  reports       LabReport[]
+  invoiceItems  InvoiceItem[]
+  documents     Document[]
+
+  @@index([patientId])
+  @@index([consultationId])
+  @@index([status])
+  @@map("lab_orders")
+}
+
+/// Append-only record of a LabOrder status transition, identical in shape to
+/// AppointmentStatusHistory — required for CANCELLED, optional otherwise.
+model LabOrderStatusHistory {
+  id          String          @id @default(uuid()) @db.Uuid
+  labOrderId  String          @db.Uuid
+  fromStatus  LabOrderStatus?
+  toStatus    LabOrderStatus
+  reason      String?
+  changedById String?         @db.Uuid
+  createdAt   DateTime        @default(now())
+
+  labOrder  LabOrder      @relation(fields: [labOrderId], references: [id], onDelete: Cascade)
+  changedBy StaffProfile? @relation(fields: [changedById], references: [id])
+
+  @@index([labOrderId])
+  @@map("lab_order_status_history")
+}
+
+enum AbnormalFlag {
+  NORMAL
+  LOW
+  HIGH
+  CRITICAL
+}
+
+/// One ordered test within a LabOrder. `unit`/`referenceRange` snapshot the LabTest catalog
+/// values at order time but can be overridden at result entry (e.g. an age/sex-specific range).
+model LabOrderItem {
+  id             String       @id @default(uuid()) @db.Uuid
+  labOrderId     String       @db.Uuid
+  labTestId      String       @db.Uuid
+  priceCents     Int
+  unit           String
+  referenceRange String
+  resultValue    String?
+  abnormalFlag   AbnormalFlag @default(NORMAL)
+  enteredAt      DateTime?
+  enteredById    String?      @db.Uuid
+
+  labOrder  LabOrder      @relation(fields: [labOrderId], references: [id], onDelete: Cascade)
+  labTest   LabTest       @relation(fields: [labTestId], references: [id])
+  enteredBy StaffProfile? @relation(fields: [enteredById], references: [id])
+
+  @@index([labOrderId])
+  @@map("lab_order_items")
+}
+
+/// An uploaded report file (e.g. a scanned/signed paper report) attached to a lab order, distinct
+/// from the app-generated printable report built from LabOrder + LabOrderItem data.
+model LabReport {
+  id           String   @id @default(uuid()) @db.Uuid
+  labOrderId   String   @db.Uuid
+  fileName     String
+  storagePath  String
+  mimeType     String
+  sizeBytes    Int
+  uploadedById String   @db.Uuid
+  createdAt    DateTime @default(now())
+
+  labOrder   LabOrder     @relation(fields: [labOrderId], references: [id], onDelete: Cascade)
+  uploadedBy StaffProfile @relation(fields: [uploadedById], references: [id])
+
+  @@index([labOrderId])
+  @@map("lab_reports")
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
+/// A self-pay invoice. `subtotalCents`/`totalCents`/`paidCents`/`status` are server-maintained
+/// caches recomputed (via `recalculateInvoice` in the service) inside the same transaction as
+/// every item/payment/refund mutation — never trust a total supplied by the client, and never let
+/// the cache drift from the underlying items/payments/refunds it summarizes. Items, discount, tax
+/// and adjustment are editable only while no payment has been recorded yet (see
+/// `isInvoiceEditable`); once money has changed hands the charged amount is frozen.
+model Invoice {
+  id              String        @id @default(uuid()) @db.Uuid
+  invoiceNumber   String        @unique
+  sequenceNumber  Int           @unique @default(autoincrement())
+  patientId       String        @db.Uuid
+  createdById     String        @db.Uuid
+  discountCents   Int           @default(0)
+  taxCents        Int           @default(0)
+  adjustmentCents Int           @default(0)
+  subtotalCents   Int           @default(0)
+  totalCents      Int           @default(0)
+  paidCents       Int           @default(0)
+  status          InvoiceStatus @default(UNPAID)
+  dueDate         DateTime?     @db.Date
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  patient   Patient       @relation(fields: [patientId], references: [id])
+  createdBy StaffProfile  @relation(fields: [createdById], references: [id])
+  items     InvoiceItem[]
+  payments  Payment[]
+
+  @@index([patientId])
+  @@index([status])
+  @@map("invoices")
+}
+
+enum InvoiceItemCategory {
+  CONSULTATION
+  LAB
+  TREATMENT
+  OTHER
+}
+
+/// One billed line on an invoice. `amountCents` (quantity × unitPriceCents) is server-computed at
+/// write time, never accepted from the client. `consultationId`/`labOrderId` are optional
+/// provenance links when the charge was pulled from that record rather than typed manually.
+model InvoiceItem {
+  id             String              @id @default(uuid()) @db.Uuid
+  invoiceId      String              @db.Uuid
+  category       InvoiceItemCategory
+  description    String
+  quantity       Int                 @default(1)
+  unitPriceCents Int
+  amountCents    Int
+  consultationId String?             @db.Uuid
+  labOrderId     String?             @db.Uuid
+  createdAt      DateTime            @default(now())
+
+  invoice      Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  consultation Consultation? @relation(fields: [consultationId], references: [id])
+  labOrder     LabOrder?     @relation(fields: [labOrderId], references: [id])
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  OTHER
+}
+
+/// A recorded payment against an invoice. No card numbers or other sensitive card data are ever
+/// stored — `reference` is a free-text note (e.g. a terminal transaction id) the staff member
+/// types in. `idempotencyKey` is generated once client-side per form mount so a double-submit
+/// (double click, retried request) is rejected by the unique constraint rather than double-billed.
+model Payment {
+  id             String        @id @default(uuid()) @db.Uuid
+  invoiceId      String        @db.Uuid
+  amountCents    Int
+  method         PaymentMethod
+  reference      String?
+  idempotencyKey String        @unique
+  recordedById   String        @db.Uuid
+  createdAt      DateTime      @default(now())
+
+  invoice    Invoice      @relation(fields: [invoiceId], references: [id])
+  recordedBy StaffProfile @relation(fields: [recordedById], references: [id])
+  refunds    Refund[]
+
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+/// A refund against one specific payment (never the invoice in the abstract) — the amount can
+/// never exceed that payment's own remaining refundable balance, enforced in the service.
+model Refund {
+  id             String   @id @default(uuid()) @db.Uuid
+  paymentId      String   @db.Uuid
+  amountCents    Int
+  reason         String
+  idempotencyKey String   @unique
+  recordedById   String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  payment    Payment      @relation(fields: [paymentId], references: [id])
+  recordedBy StaffProfile @relation(fields: [recordedById], references: [id])
+
+  @@index([paymentId])
+  @@map("refunds")
+}
+
+/// Clinic-configurable document category lookup (Settings master data), mirroring
+/// Department/Specialization/Medicine/LabTest.
+model DocumentCategory {
+  id         String       @id @default(uuid()) @db.Uuid
+  name       String       @unique
+  status     RecordStatus @default(ACTIVE)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  archivedAt DateTime?
+
+  documents Document[]
+
+  @@map("document_categories")
+}
+
+/// A private, patient-associated file. Soft-deleted via `status` (ACTIVE/ARCHIVED) — never hard
+/// removed. `consultationId`/`labOrderId` are optional provenance links; this is a general file
+/// cabinet (ID, consent forms, insurance cards, ...), distinct from ConsultationAttachment and
+/// LabReport which already cover in-workflow clinical/lab file uploads.
+model Document {
+  id             String       @id @default(uuid()) @db.Uuid
+  patientId      String       @db.Uuid
+  categoryId     String       @db.Uuid
+  consultationId String?      @db.Uuid
+  labOrderId     String?      @db.Uuid
+  fileName       String
+  storagePath    String
+  mimeType       String
+  sizeBytes      Int
+  status         RecordStatus @default(ACTIVE)
+  uploadedById   String       @db.Uuid
+  archivedAt     DateTime?
+  createdAt      DateTime     @default(now())
+
+  patient      Patient          @relation(fields: [patientId], references: [id])
+  category     DocumentCategory @relation(fields: [categoryId], references: [id])
+  consultation Consultation?    @relation(fields: [consultationId], references: [id])
+  labOrder     LabOrder?        @relation(fields: [labOrderId], references: [id])
+  uploadedBy   StaffProfile     @relation(fields: [uploadedById], references: [id])
+
+  @@index([patientId])
+  @@index([status])
+  @@map("documents")
+}
+
+/// A patient's own portal login, separate from StaffProfile. Keyed by the Supabase Auth user id
+/// created for them (via the admin API) when staff enable portal access from the patient's
+/// profile. One patient has at most one account.
+model PatientAccount {
+  id          String      @id @db.Uuid
+  patientId   String      @unique @db.Uuid
+  email       String      @unique
+  status      StaffStatus @default(ACTIVE)
+  createdById String      @db.Uuid
+  lastLoginAt DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  patient   Patient      @relation(fields: [patientId], references: [id])
+  createdBy StaffProfile @relation(fields: [createdById], references: [id])
+
+  @@map("patient_accounts")
 }

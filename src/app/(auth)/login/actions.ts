@@ -1,5 +1,7 @@
 "use server";
 
+import { safeRedirect } from "@/lib/auth/safe-redirect";
+import { prisma } from "@/lib/db/prisma";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/auth/supabase-server";
 import { loginSchema } from "@/lib/validation/common";
@@ -20,12 +22,16 @@ export async function loginAction(
   }
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.signInWithPassword(parsed.data);
+  const { data, error } = await supabase.auth.signInWithPassword(parsed.data);
 
   if (error) {
     return { error: "Invalid email or password." };
   }
 
-  const next = formData.get("next");
-  redirect(typeof next === "string" && next.startsWith("/") ? next : "/dashboard");
+  const profile = data.user ? await prisma.staffProfile.findUnique({ where: { id: data.user.id } }) : null;
+  if (!profile || profile.status !== "ACTIVE" || profile.role === "PATIENT") {
+    await supabase.auth.signOut();
+    return { error: "Invalid email or password." };
+  }
+  redirect(safeRedirect(formData.get("next")));
 }

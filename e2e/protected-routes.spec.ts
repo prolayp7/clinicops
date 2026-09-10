@@ -10,9 +10,9 @@ test("authenticated staff user reaches the dashboard and sees role-appropriate n
 }) => {
   // Requires a seeded fictional Supabase Auth user matching prisma/seed.ts.
   await page.goto("/login");
-  await page.getByLabel("Email").fill("doctor@example.test");
-  await page.getByLabel("Password").fill(process.env.E2E_SEED_PASSWORD ?? "");
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByLabel("Work Email", { exact: true }).fill("doctor@example.test");
+  await page.getByLabel("Password", { exact: true }).fill(process.env.E2E_SEED_PASSWORD ?? "");
+  await page.getByRole("button", { name: "Sign in securely" }).click();
   await expect(page).toHaveURL(/\/dashboard/);
   await expect(page.getByRole("link", { name: "Dashboard" })).toBeVisible();
 });

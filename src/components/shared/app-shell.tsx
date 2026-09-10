@@ -12,12 +12,18 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="grid min-h-screen grid-cols-[248px_1fr]">
-      <aside className="row-span-2">
+    <div className="min-h-screen">
+      <aside className="fixed inset-y-0 left-0 z-40 w-[248px] print:hidden">
         <Sidebar role={role} />
       </aside>
-      <Header fullName={fullName} role={role} />
-      <main className="bg-background p-6">{children}</main>
+      <div className="print:pl-0 pl-[248px]">
+        <div className="fixed top-0 right-0 left-[248px] z-30 print:hidden">
+          <Header fullName={fullName} role={role} />
+        </div>
+        <main className="bg-background min-h-screen pt-16 print:pt-0">
+          <div className="mx-auto max-w-[1600px] p-6 print:max-w-none print:p-0">{children}</div>
+        </main>
+      </div>
     </div>
   );
 }
