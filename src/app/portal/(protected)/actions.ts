@@ -1,10 +1,9 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/auth/supabase-server";
+import { authProvider } from "@/lib/auth/providers";
 
 export async function signOutPortalAction(): Promise<void> {
-  const supabase = await createSupabaseServerClient();
-  await supabase.auth.signOut();
+  await authProvider().signOut("patient");
   redirect("/portal/login");
 }

@@ -31,6 +31,9 @@ yarn-error.log*
 .env*.local
 .env
 
+# self-hosted storage provider's local file root (dev default)
+/.local-storage
+
 # vercel
 .vercel
 

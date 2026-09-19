@@ -3,7 +3,7 @@ import { Role } from "@prisma/client";
 export { Role };
 
 export const ALL_ROLES = Object.values(Role);
-const STAFF_ROLES = ALL_ROLES.filter((r) => r !== Role.PATIENT);
+export const STAFF_ROLES = ALL_ROLES.filter((r) => r !== Role.PATIENT);
 
 const { SUPER_ADMIN, ADMIN, DOCTOR, RECEPTIONIST, NURSE, LAB_TECHNICIAN, ACCOUNTANT } = Role;
 
@@ -34,4 +34,12 @@ export function getNavItemsForRole(role: Role) {
 
 export function isStaffRole(role: Role): boolean {
   return role !== Role.PATIENT;
+}
+
+/** Human-readable label for a Role value, e.g. "SUPER_ADMIN" -> "Super Admin". */
+export function roleLabel(role: Role): string {
+  return role
+    .split("_")
+    .map((part) => part[0] + part.slice(1).toLowerCase())
+    .join(" ");
 }

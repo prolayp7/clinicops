@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/auth/supabase-server";
+import { authProvider } from "@/lib/auth/providers";
 import { prisma } from "@/lib/db/prisma";
 import { loginSchema } from "@/lib/validation/common";
 
@@ -20,16 +20,16 @@ export async function portalLoginAction(
     return { error: "Enter a valid email and password (minimum 8 characters)." };
   }
 
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.auth.signInWithPassword(parsed.data);
+  const provider = authProvider();
+  const result = await provider.signIn("patient", parsed.data.email, parsed.data.password);
 
-  if (error || !data.user) {
+  if (!result.ok) {
     return { error: "Invalid email or password." };
   }
 
-  const account = await prisma.patientAccount.findUnique({ where: { id: data.user.id } });
+  const account = await prisma.patientAccount.findUnique({ where: { id: result.authUserId } });
   if (!account || account.status === "ARCHIVED") {
-    await supabase.auth.signOut();
+    await provider.signOut("patient");
     return { error: "This portal account is not active. Contact the clinic for help." };
   }
 

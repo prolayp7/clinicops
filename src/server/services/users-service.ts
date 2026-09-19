@@ -3,11 +3,13 @@ import { randomBytes } from "node:crypto";
 import { Prisma, type Role, type StaffStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { assertCan } from "@/lib/permissions/policies";
-import { adminClient } from "@/lib/storage";
+import { authProvider } from "@/lib/auth/providers";
 import { recordAuditEvent } from "@/server/services/audit-service";
 import type { CurrentUser } from "@/lib/auth/session";
 import type { CreateStaffInput } from "@/lib/validation/users";
 
+/** A short, easy-to-relay temporary password — the staff member is expected to change it after
+ * first login (or use "Forgot password?" once signed in for the first time). */
 function generateTemporaryPassword(): string {
   return randomBytes(9).toString("base64url");
 }
@@ -20,7 +22,9 @@ export type ListStaffParams = {
   pageSize: number;
 };
 
-export async function listStaff({ search, role, status, page, pageSize }: ListStaffParams) {
+export async function listStaff(actor: CurrentUser, { search, role, status, page, pageSize }: ListStaffParams) {
+  assertCan(actor.profile.role, "users:view");
+
   const where: Prisma.StaffProfileWhereInput = {
     ...(role ? { role } : {}),
     ...(status ? { status } : {}),
@@ -53,23 +57,19 @@ export async function createStaffUser(actor: CurrentUser, input: CreateStaffInpu
   const existing = await prisma.staffProfile.findUnique({ where: { email: input.email } });
   if (existing) throw new Error("A staff account with this email already exists.");
 
-  const supabase = adminClient();
   const temporaryPassword = generateTemporaryPassword();
-  const { data, error } = await supabase.auth.admin.createUser({
-    email: input.email,
-    password: temporaryPassword,
-    email_confirm: true,
-  });
-  if (error || !data.user) {
-    throw new Error(error?.message ?? "Could not create the staff login.");
+  const created = await authProvider().adminCreateUser("staff", input.email, temporaryPassword);
+  if ("error" in created) {
+    throw new Error(created.error);
   }
 
   const staff = await prisma.staffProfile.create({
     data: {
-      id: data.user.id,
+      id: created.authUserId,
       email: input.email,
       fullName: input.fullName,
       role: input.role,
+      passwordHash: created.passwordHash,
     },
   });
 
@@ -112,6 +112,13 @@ export async function setStaffStatus(actor: CurrentUser, staffId: string, status
     data: { status, archivedAt: status === "ARCHIVED" ? new Date() : null },
   });
 
+  if (status === "ARCHIVED") {
+    // Belt-and-suspenders: the ARCHIVED check in getCurrentUser() already blocks this account on
+    // every request regardless of provider, but dropping its self-hosted sessions too means a
+    // revoked account doesn't linger in the session table until natural expiry.
+    await prisma.staffSession.deleteMany({ where: { staffId } });
+  }
+
   await recordAuditEvent({
     actorId: actor.profile.id,
     actorRole: actor.profile.role,
@@ -129,15 +136,16 @@ export async function resetStaffPassword(actor: CurrentUser, staffId: string) {
   const staff = await prisma.staffProfile.findUnique({ where: { id: staffId } });
   if (!staff) throw new Error("Staff account not found.");
 
-  const supabase = adminClient();
   const temporaryPassword = generateTemporaryPassword();
-  const { error } = await supabase.auth.admin.updateUserById(staff.id, { password: temporaryPassword });
-  if (error) throw new Error(error.message);
+  const result = await authProvider().adminSetPassword("staff", staff.id, temporaryPassword);
+  if ("error" in result) throw new Error(result.error);
+
+  await prisma.staffProfile.update({ where: { id: staff.id }, data: { passwordHash: result.passwordHash } });
 
   await recordAuditEvent({
     actorId: actor.profile.id,
     actorRole: actor.profile.role,
-    action: "staff.password_reset",
+    action: "staff.password_reset_by_admin",
     entityType: "StaffProfile",
     entityId: staff.id,
   });

@@ -2,7 +2,7 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
 import { assertCan } from "@/lib/permissions/policies";
-import { adminClient } from "@/lib/storage";
+import { authProvider } from "@/lib/auth/providers";
 import { recordAuditEvent } from "@/server/services/audit-service";
 import type { CurrentUser } from "@/lib/auth/session";
 import type { EnablePortalAccessInput } from "@/lib/validation/portal";
@@ -27,23 +27,19 @@ export async function enablePortalAccess(
   const existing = await prisma.patientAccount.findUnique({ where: { patientId } });
   if (existing) throw new Error("This patient already has a portal account.");
 
-  const supabase = adminClient();
   const temporaryPassword = generateTemporaryPassword();
-  const { data, error } = await supabase.auth.admin.createUser({
-    email: input.email,
-    password: temporaryPassword,
-    email_confirm: true,
-  });
-  if (error || !data.user) {
-    throw new Error(error?.message ?? "Could not create the portal login.");
+  const created = await authProvider().adminCreateUser("patient", input.email, temporaryPassword);
+  if ("error" in created) {
+    throw new Error(created.error);
   }
 
   const account = await prisma.patientAccount.create({
     data: {
-      id: data.user.id,
+      id: created.authUserId,
       patientId,
       email: input.email,
       createdById: actor.profile.id,
+      passwordHash: created.passwordHash,
     },
   });
 
@@ -65,10 +61,11 @@ export async function resetPortalPassword(actor: CurrentUser, patientId: string)
   const account = await prisma.patientAccount.findUnique({ where: { patientId } });
   if (!account) throw new Error("This patient does not have a portal account yet.");
 
-  const supabase = adminClient();
   const temporaryPassword = generateTemporaryPassword();
-  const { error } = await supabase.auth.admin.updateUserById(account.id, { password: temporaryPassword });
-  if (error) throw new Error(error.message);
+  const result = await authProvider().adminSetPassword("patient", account.id, temporaryPassword);
+  if ("error" in result) throw new Error(result.error);
+
+  await prisma.patientAccount.update({ where: { id: account.id }, data: { passwordHash: result.passwordHash } });
 
   await recordAuditEvent({
     actorId: actor.profile.id,
@@ -89,6 +86,10 @@ export async function setPortalAccountStatus(
   assertCan(actor.profile.role, "patients:manage-portal-access");
 
   const account = await prisma.patientAccount.update({ where: { patientId }, data: { status } });
+
+  if (status === "ARCHIVED") {
+    await prisma.patientSession.deleteMany({ where: { patientAccountId: account.id } });
+  }
 
   await recordAuditEvent({
     actorId: actor.profile.id,

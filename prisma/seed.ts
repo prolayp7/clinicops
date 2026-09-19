@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { PrismaClient, Role } from "@prisma/client";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
@@ -15,7 +17,7 @@ const FICTIONAL_STAFF: Array<{ email: string; fullName: string; role: Role }> = 
 ];
 
 // Shared password for every fictional account. Fine as a checked-in default: these are
-// throwaway accounts on a non-production Supabase project, never real staff or patients.
+// throwaway accounts, never real staff or patients.
 const SEED_PASSWORD = process.env.E2E_SEED_PASSWORD ?? "ClinicOps-Dev-Seed-2026";
 
 function requireEnv(name: string): string {
@@ -61,14 +63,30 @@ async function upsertAuthUser(supabase: SupabaseClient, email: string): Promise<
 
 async function main() {
   if (process.env.ALLOW_DEMO_SEED !== "true" || process.env.NODE_ENV === "production") throw new Error("Demo seeding requires ALLOW_DEMO_SEED=true in a non-production environment.");
-  const supabase = createClient(
-    requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
-    requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
+
+  const selfhosted = process.env.AUTH_PROVIDER === "selfhosted";
+  // Deliberately not imported from src/lib/auth/providers: that module is guarded by
+  // "server-only", which throws when required outside Next's server bundler (this script runs
+  // as a plain tsx process). Inlining the same two primitives (bcrypt hash, random uuid) keeps
+  // the script standalone while still producing rows the self-hosted auth provider can log into.
+  const passwordHash = selfhosted ? await bcrypt.hash(SEED_PASSWORD, 12) : null;
+  const supabase = selfhosted
+    ? null
+    : createClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("SUPABASE_SERVICE_ROLE_KEY"), {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
 
   for (const staff of FICTIONAL_STAFF) {
-    const authUserId = await upsertAuthUser(supabase, staff.email);
+    let authUserId: string;
+    if (selfhosted) {
+      // Reuse the existing row's id across reseeds (there is no external identity provider to
+      // ask, unlike the Supabase branch's upsertAuthUser) so sessions/audit history tied to it
+      // survive; only generate a fresh id the first time this email is seeded.
+      const existing = await prisma.staffProfile.findUnique({ where: { email: staff.email } });
+      authUserId = existing?.id ?? randomUUID();
+    } else {
+      authUserId = await upsertAuthUser(supabase!, staff.email);
+    }
 
     // The auth user id is the source of truth; drop any stale profile row left over from a
     // previous seed run under a different id for the same email.
@@ -77,9 +95,9 @@ async function main() {
     });
 
     await prisma.staffProfile.upsert({
-      where: { id: authUserId },
-      update: staff,
-      create: { id: authUserId, ...staff },
+      where: { email: staff.email },
+      update: { ...staff, ...(selfhosted ? { passwordHash } : {}) },
+      create: { id: authUserId, ...staff, ...(selfhosted ? { passwordHash } : {}) },
     });
 
     console.log(`Seeded ${staff.role} — ${staff.email}`);
@@ -91,8 +109,9 @@ main()
   .then(async () => {
     await prisma.$disconnect();
   })
-  .catch(async () => {
+  .catch(async (error) => {
     console.error("Seed failed. Check staging configuration; sensitive provider errors are suppressed.");
+    console.error(error instanceof Error ? error.message : error);
     await prisma.$disconnect();
     process.exit(1);
   });

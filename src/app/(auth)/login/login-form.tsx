@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useState } from "react";
 import { ArrowRight, Eye, EyeOff, Lock, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -41,16 +42,9 @@ export function LoginForm({ next }: { next?: string }) {
           <Label htmlFor="password" className="text-muted-foreground text-caption font-semibold tracking-wider uppercase">
             Password
           </Label>
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            className="text-caption h-auto p-0"
-            disabled
-            title="Password reset isn't built yet"
-          >
+          <Link href="/forgot-password" className="text-primary text-caption underline">
             Forgot password?
-          </Button>
+          </Link>
         </div>
         <div className="relative">
           <Lock className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />

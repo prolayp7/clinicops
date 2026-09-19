@@ -37,14 +37,16 @@ enum StaffStatus {
 /// Staff-side identity, keyed by the Supabase Auth user id (auth.users.id). Patients get a
 /// separate PatientAccount identity (see below) rather than a StaffProfile row.
 model StaffProfile {
-  id         String      @id @db.Uuid
-  email      String      @unique
-  fullName   String
-  role       Role
-  status     StaffStatus @default(ACTIVE)
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
-  archivedAt DateTime?
+  id           String      @id @db.Uuid
+  email        String      @unique
+  fullName     String
+  role         Role
+  status       StaffStatus @default(ACTIVE)
+  /// bcrypt hash, set only for AUTH_PROVIDER=selfhosted accounts; null for Supabase-managed rows.
+  passwordHash String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  archivedAt   DateTime?
 
   auditLogs                AuditLog[]
   doctor                   Doctor?
@@ -61,12 +63,42 @@ model StaffProfile {
   refundsRecorded          Refund[]
   documentsUploaded        Document[]
   patientAccountsCreated   PatientAccount[]
+  sessions                 StaffSession[]
+  passwordResetTokens      PasswordResetToken[]
 
   @@index([role])
   @@map("staff_profiles")
 }
 
+/// Self-hosted (AUTH_PROVIDER=selfhosted) staff session. Unused when a deployment runs on
+/// Supabase Auth, which manages its own sessions. tokenHash is sha256(raw cookie token); the
+/// raw token itself is never stored, so a database leak alone can't be replayed as a live session.
+model StaffSession {
+  id        String       @id @default(cuid())
+  tokenHash String       @unique
+  staffId   String       @db.Uuid
+  staff     StaffProfile @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime     @default(now())
+
+  @@index([staffId])
+  @@map("staff_sessions")
+}
+
 /// Append-only record of security-relevant actions. Never updated or deleted by application code.
+model PasswordResetToken {
+  id        String       @id @default(cuid())
+  tokenHash String       @unique
+  staffId   String       @db.Uuid
+  staff     StaffProfile @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime     @default(now())
+
+  @@index([staffId])
+  @@map("password_reset_tokens")
+}
+
 model AuditLog {
   id         String        @id @default(uuid()) @db.Uuid
   actorId    String?       @db.Uuid
@@ -86,6 +118,17 @@ model AuditLog {
 enum RecordStatus {
   ACTIVE
   ARCHIVED
+}
+
+/// Fixed-window counter backing src/lib/rate-limit.ts. One row per (scope, identifier) key;
+/// count/windowStart reset atomically via INSERT ... ON CONFLICT when the window has elapsed.
+model RateLimitBucket {
+  key         String   @id
+  count       Int      @default(0)
+  windowStart DateTime @default(now())
+
+  @@index([windowStart])
+  @@map("rate_limit_buckets")
 }
 
 enum Weekday {
@@ -827,17 +870,34 @@ model Document {
 /// created for them (via the admin API) when staff enable portal access from the patient's
 /// profile. One patient has at most one account.
 model PatientAccount {
-  id          String      @id @db.Uuid
-  patientId   String      @unique @db.Uuid
-  email       String      @unique
-  status      StaffStatus @default(ACTIVE)
-  createdById String      @db.Uuid
-  lastLoginAt DateTime?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id           String      @id @db.Uuid
+  patientId    String      @unique @db.Uuid
+  email        String      @unique
+  status       StaffStatus @default(ACTIVE)
+  createdById  String      @db.Uuid
+  /// bcrypt hash, set only for AUTH_PROVIDER=selfhosted accounts; null for Supabase-managed rows.
+  passwordHash String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
-  patient   Patient      @relation(fields: [patientId], references: [id])
-  createdBy StaffProfile @relation(fields: [createdById], references: [id])
+  patient   Patient          @relation(fields: [patientId], references: [id])
+  createdBy StaffProfile     @relation(fields: [createdById], references: [id])
+  sessions  PatientSession[]
 
   @@map("patient_accounts")
+}
+
+/// Self-hosted (AUTH_PROVIDER=selfhosted) patient-portal session. Unused when a deployment runs
+/// on Supabase Auth. Same tokenHash-only storage rationale as StaffSession.
+model PatientSession {
+  id               String         @id @default(cuid())
+  tokenHash        String         @unique
+  patientAccountId String         @db.Uuid
+  patientAccount   PatientAccount @relation(fields: [patientAccountId], references: [id], onDelete: Cascade)
+  expiresAt        DateTime
+  createdAt        DateTime       @default(now())
+
+  @@index([patientAccountId])
+  @@map("patient_sessions")
 }

@@ -3,7 +3,7 @@
 import { safeRedirect } from "@/lib/auth/safe-redirect";
 import { prisma } from "@/lib/db/prisma";
 import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/auth/supabase-server";
+import { authProvider } from "@/lib/auth/providers";
 import { loginSchema } from "@/lib/validation/common";
 
 export type LoginFormState = { error: string | null };
@@ -21,16 +21,16 @@ export async function loginAction(
     return { error: "Enter a valid email and password (minimum 8 characters)." };
   }
 
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.auth.signInWithPassword(parsed.data);
+  const provider = authProvider();
+  const result = await provider.signIn("staff", parsed.data.email, parsed.data.password);
 
-  if (error) {
+  if (!result.ok) {
     return { error: "Invalid email or password." };
   }
 
-  const profile = data.user ? await prisma.staffProfile.findUnique({ where: { id: data.user.id } }) : null;
+  const profile = await prisma.staffProfile.findUnique({ where: { id: result.authUserId } });
   if (!profile || profile.status !== "ACTIVE" || profile.role === "PATIENT") {
-    await supabase.auth.signOut();
+    await provider.signOut("staff");
     return { error: "Invalid email or password." };
   }
   redirect(safeRedirect(formData.get("next")));
