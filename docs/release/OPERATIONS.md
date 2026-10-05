@@ -1,10 +1,20 @@
 # Release operations and admin handover
 
-Status: runbook prepared; no production deployment, migration application, restore drill, monitoring setup or credential handover has been performed by this review. Use synthetic records on a confirmed isolated staging project. Do not run demo seed against production.
+Status: runbook prepared; no production deployment, migration application, restore drill, monitoring setup or credential handover has been performed by this review. Use synthetic records only on a confirmed isolated staging project. Never target a live clinic database with demo data.
 
 ## Environment and deployment
 
 Use separate staging and production Supabase projects and deployment environments. Provision secrets in the hosting secret manager; never copy .env or supabase_creds.md into artifacts. NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are public project identifiers; SUPABASE_SERVICE_ROLE_KEY bypasses RLS and must stay server-only. DATABASE_URL is the runtime database connection; DIRECT_URL is the direct migration/backup connection. CLINIC_TIMEZONE must agree with ClinicSetting.timezone. E2E_SEED_PASSWORD and ALLOW_DEMO_SEED=true are staging-only. Rotate demo passwords before any real rollout; do not use seeded staff in production.
+
+### Synthetic dashboard dataset
+
+`prisma/seed.ts` provisions 1,500 synthetic doctor profiles and 3,500 nurse profiles across 15 specialties, five departments, and three reserved example email domains, plus 2,000 deterministic synthetic patients and linked appointments. Nurse records include employee numbers, synthetic qualifications, department and shift times; 3,500 nurse-to-appointment assignments include lifecycle timestamps, and consultation vitals identify the assigned nurse who recorded them. Doctor, patient and staff names are varied but deterministically generated, so reruns keep identities stable. Demo doctors receive weekday availability. Nurse dashboard and appointment/consultation access is scoped to each nurse's assignments. It creates no patient portal accounts, reminders, uploaded files or real clinical data. Stable demo identifiers make reruns idempotent; rerunning updates demo-owned operational records and keeps the current-day queue current. This is a manual post-migration operation, never a build or automatic deployment hook.
+
+For a deployed staging database, first confirm `DATABASE_URL` and `DIRECT_URL` point to the isolated staging project. Set `ALLOW_DEMO_SEED=true`. If the host sets `NODE_ENV=production`, also set `ALLOW_PRODUCTION_DEMO_SEED=true` and `DEMO_SEED_TARGET=isolated-staging`; the script otherwise refuses to write. Run `npx prisma db seed` (or `npm run db:seed`).
+
+To provision the 1,500 doctor and 3,500 nurse login identities plus the other demo staff accounts in an empty staging database, set `SEED_DEMO_STAFF=true`. Supabase Auth seeding requires `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; self-hosted auth does not. All demo staff use `E2E_SEED_PASSWORD`. When `NODE_ENV=production` and demo staff seeding is explicitly enabled, set it to a unique secret of at least 32 characters in the host secret manager. Never copy that value into a terminal transcript, source file or release report. If demo staff seeding is disabled, the database must already have active doctor profiles, nurse profiles and an active staff account.
+
+Before the first write, run `SEED_DRY_RUN=true npm run db:seed`; this prints planned record counts and performs no database writes. Do not use the opt-in flags against the live clinic database, even if a production deployment is technically able to run the command. The seed does not create storage objects, so it intentionally creates no document or lab-report file rows.
 
 1. Record the reviewed commit, environment, operator and rollback owner. Resolve every blocker in RELEASE_READINESS.md before approving deployment.
 2. Install the lockfile with npm ci on Node 20+; run npm run typecheck, npm run lint, npm test, npm run build and npm run test:e2e. Browser prerequisites: npx playwright install --with-deps chromium. Full journey and authenticated role matrix remain required beyond the current browser smoke tests.

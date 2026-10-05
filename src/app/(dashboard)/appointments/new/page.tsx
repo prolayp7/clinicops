@@ -23,6 +23,9 @@ export default async function NewAppointmentPage({
   const params = await searchParams;
   const parsedFilters = appointmentFiltersSchema.safeParse(params);
   const filters = parsedFilters.success ? parsedFilters.data : {};
+  const defaultSource = params.source === "WALK_IN" || params.source === "ONLINE_REQUEST"
+    ? params.source
+    : "STAFF_BOOKED";
 
   const [patients, doctors] = await Promise.all([
     prisma.patient.findMany({
@@ -55,6 +58,7 @@ export default async function NewAppointmentPage({
           canOverride={canOverride}
           defaultDoctorId={filters.doctorId}
           defaultDate={defaultDate}
+          defaultSource={defaultSource}
         />
       </Card>
     </div>

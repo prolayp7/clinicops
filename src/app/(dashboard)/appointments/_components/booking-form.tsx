@@ -3,9 +3,10 @@
 import { useActionState, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { DatePicker } from "@/components/shared/date-picker";
+import { TimePicker } from "@/components/shared/time-picker";
 import {
   Select,
   SelectContent,
@@ -24,12 +25,14 @@ export function BookingForm({
   canOverride,
   defaultDoctorId,
   defaultDate,
+  defaultSource,
 }: {
   patients: PatientOption[];
   doctors: DoctorOption[];
   canOverride: boolean;
   defaultDoctorId?: string;
   defaultDate?: string;
+  defaultSource?: "STAFF_BOOKED" | "WALK_IN" | "ONLINE_REQUEST";
 }) {
   const [state, formAction, isPending] = useActionState<FormState, FormData>(bookAppointmentAction, {
     error: null,
@@ -47,7 +50,6 @@ export function BookingForm({
   return (
     <form ref={formRef} action={formAction} key={JSON.stringify(v)} className="space-y-4">
       <input type="hidden" name="force" value={force ? "true" : "false"} />
-
       <div className="space-y-1.5">
         <Label htmlFor="patientId">Patient</Label>
         <Select name="patientId" defaultValue={v?.patientId} required>
@@ -83,23 +85,22 @@ export function BookingForm({
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label htmlFor="date">Date</Label>
-          <Input
+          <DatePicker
             id="date"
             name="date"
-            type="date"
             required
             defaultValue={v?.date ?? defaultDate}
           />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="startTime">Start time</Label>
-          <Input id="startTime" name="startTime" type="time" required defaultValue={v?.startTime} />
+          <TimePicker id="startTime" name="startTime" required defaultValue={v?.startTime} />
         </div>
       </div>
 
       <div className="space-y-1.5">
         <Label htmlFor="source">Booking source</Label>
-        <Select name="source" defaultValue={v?.source ?? "STAFF_BOOKED"} required>
+        <Select name="source" defaultValue={v?.source ?? defaultSource ?? "STAFF_BOOKED"} required>
           <SelectTrigger id="source" className="w-full">
             <SelectValue />
           </SelectTrigger>

@@ -8,7 +8,7 @@ vi.mock("server-only", () => ({}));
 const db = vi.hoisted(() => ({
   doctor: { findUnique: vi.fn() },
   patient: { findFirst: vi.fn() },
-    appointment: { findMany: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+    appointment: { findMany: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), count: vi.fn() },
   doctorAvailability: { findMany: vi.fn() },
   doctorLeave: { findMany: vi.fn() },
   $transaction: vi.fn(),
@@ -29,9 +29,12 @@ import {
   requestAppointment,
   rescheduleAppointment,
   changeAppointmentStatus,
+  listAppointments,
+  getAppointmentById,
 } from "@/server/services/appointments-service";
 
 const actor = { profile: { id: "receptionist-1", role: Role.RECEPTIONIST } } as CurrentUser;
+const nurseActor = { profile: { id: "nurse-1", role: Role.NURSE } } as CurrentUser;
 const input = {
   patientId: "patient-1",
   doctorId: "doctor-1",
@@ -51,6 +54,7 @@ beforeEach(() => {
   db.patient.findFirst.mockResolvedValue({ id: "patient-1" });
   db.appointment.findMany.mockResolvedValue([]);
   db.appointment.findFirst.mockResolvedValue({ id: "appointment-1", status: "SCHEDULED" });
+  db.appointment.count.mockResolvedValue(0);
   db.doctorAvailability.findMany.mockResolvedValue([
     { weekday: "MONDAY", startTime: timeStringToDate("09:00"), endTime: timeStringToDate("12:00") },
   ]);
@@ -65,6 +69,37 @@ beforeEach(() => {
 });
 
 describe("appointment booking workflows", () => {
+  it("scopes nurse appointment lists to the signed-in nurse's active assignments", async () => {
+    await expect(listAppointments(nurseActor, {})).resolves.toMatchObject({ items: [], total: 0 });
+
+    const nurseScope = {
+      nurseAssignments: {
+        some: { nurseProfile: { staffProfileId: "nurse-1", status: "ACTIVE" } },
+      },
+    };
+    expect(db.appointment.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: nurseScope }));
+    expect(db.appointment.count).toHaveBeenCalledWith({ where: nurseScope });
+  });
+
+  it("scopes direct appointment reads and status updates to nurse assignments", async () => {
+    await getAppointmentById(nurseActor, "appointment-1");
+    expect(db.appointment.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: "appointment-1",
+        nurseAssignments: {
+          some: { nurseProfile: { staffProfileId: "nurse-1", status: "ACTIVE" } },
+        },
+      },
+    }));
+
+    await changeAppointmentStatus(nurseActor, "appointment-1", {
+      fromStatus: "SCHEDULED",
+      toStatus: "CHECKED_IN",
+      reason: "",
+    });
+    expect(tx.appointment.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "appointment-1", status: "SCHEDULED" } }));
+  });
+
   it("books a staff appointment, records initial status history, and queues a reminder", async () => {
     await expect(bookAppointment(actor, input)).resolves.toMatchObject({ id: "appointment-created" });
 

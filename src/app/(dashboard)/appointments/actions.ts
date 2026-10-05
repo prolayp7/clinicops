@@ -98,6 +98,7 @@ export async function rescheduleAppointmentAction(
   }
 
   revalidatePath("/appointments");
+  revalidatePath("/dashboard/receptionist");
   revalidatePath(`/appointments/${id}`);
   return { error: null };
 }
@@ -127,6 +128,7 @@ export async function changeStatusAction(
   }
 
   revalidatePath("/appointments");
+  revalidatePath("/dashboard/receptionist");
   revalidatePath(`/appointments/${id}`);
   return { error: null };
 }

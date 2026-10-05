@@ -314,6 +314,12 @@ describe("Phase 8 document, report and portal-administration policies", () => {
 });
 
 describe("staff administration policy", () => {
+  it("allows receptionists to view staff without granting management or audit access", () => {
+    expect(can(Role.RECEPTIONIST, "users:view")).toBe(true);
+    expect(can(Role.RECEPTIONIST, "users:manage")).toBe(false);
+    expect(can(Role.RECEPTIONIST, "audit-logs:view")).toBe(false);
+  });
+
   it("allows Admin and Super Admin to manage staff while denying operational roles", () => {
     expect(can(Role.SUPER_ADMIN, "users:manage")).toBe(true);
     expect(can(Role.ADMIN, "users:manage")).toBe(true);

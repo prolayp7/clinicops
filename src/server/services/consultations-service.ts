@@ -1,4 +1,4 @@
-import { doctorScope } from "@/lib/permissions/record-scope";
+import { doctorScope, nurseAppointmentScope } from "@/lib/permissions/record-scope";
 import "server-only";
 import { Prisma, Role } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
@@ -23,6 +23,18 @@ function assertOwnsConsultation(actor: CurrentUser, doctorStaffProfileId: string
   if (actor.profile.role === Role.DOCTOR && doctorStaffProfileId !== actor.profile.id) {
     throw new ForbiddenError("consultations:manage-clinical");
   }
+}
+
+async function assertNurseAssigned(actor: CurrentUser, appointmentId: string) {
+  if (actor.profile.role !== Role.NURSE) return;
+  const assignment = await prisma.nurseAppointmentAssignment.findFirst({
+    where: {
+      appointmentId,
+      nurseProfile: { staffProfileId: actor.profile.id, status: "ACTIVE" },
+    },
+    select: { id: true },
+  });
+  if (!assignment) throw new ForbiddenError("consultations:view");
 }
 
 const consultationInclude = {
@@ -63,6 +75,7 @@ export async function listConsultationQueue(actor: CurrentUser, params: ListCons
       ...(params.date ? { date: new Date(params.date) } : {}),
       ...(params.doctorId ? { doctorId: params.doctorId } : {}),
       ...doctorScope(actor),
+      ...nurseAppointmentScope(actor),
     },
     include: {
       patient: { select: { id: true, patientId: true, firstName: true, lastName: true } },
@@ -84,6 +97,7 @@ export async function listRecentConsultations(
       ...(params.patientId ? { patientId: params.patientId } : {}),
       ...(params.doctorId ? { doctorId: params.doctorId } : {}),
       ...doctorScope(actor),
+      ...(actor.profile.role === Role.NURSE ? { appointment: nurseAppointmentScope(actor) } : {}),
     },
     include: {
       patient: { select: { id: true, patientId: true, firstName: true, lastName: true } },
@@ -103,6 +117,7 @@ export async function getConsultationById(actor: CurrentUser, id: string) {
   });
   if (!consultation) return null;
   assertOwnsConsultation(actor, consultation.doctor.staffProfileId);
+  await assertNurseAssigned(actor, consultation.appointment.id);
 
   const attachments = await Promise.all(
     consultation.attachments.map(async (a) => ({
@@ -126,6 +141,7 @@ export async function startOrResumeConsultation(actor: CurrentUser, appointmentI
   });
   if (!appointment) throw new Error("Appointment not found.");
   assertOwnsConsultation(actor, appointment.doctor.staffProfileId);
+  await assertNurseAssigned(actor, appointment.id);
 
   if (appointment.consultation) return appointment.consultation;
 
@@ -151,6 +167,15 @@ export async function startOrResumeConsultation(actor: CurrentUser, appointmentI
           toStatus: "IN_CONSULTATION",
           changedById: actor.profile.id,
         },
+      });
+    }
+    if (actor.profile.role === Role.NURSE) {
+      await tx.nurseAppointmentAssignment.updateMany({
+        where: {
+          appointmentId: appointment.id,
+          nurseProfile: { staffProfileId: actor.profile.id },
+        },
+        data: { status: "IN_PROGRESS", startedAt: new Date() },
       });
     }
 
@@ -213,15 +238,29 @@ export async function saveDraft(actor: CurrentUser, id: string, input: SaveDraft
   const canClinical = can(actor.profile.role, "consultations:manage-clinical");
   if (!canVitals && !canClinical) assertCan(actor.profile.role, "consultations:manage-vitals");
   if (canClinical) assertOwnsConsultation(actor, consultation.doctor.staffProfileId);
+  await assertNurseAssigned(actor, consultation.appointmentId);
 
   const { vitals, clinical } = splitDraftFields(input);
+  const hasVitals = Object.values(vitals).some((value) => value !== null && value !== undefined);
 
-  await prisma.consultation.update({
-    where: { id },
-    data: {
-      ...(canVitals ? vitals : {}),
-      ...(canClinical ? clinical : {}),
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.consultation.update({
+      where: { id },
+      data: {
+        ...(canVitals ? vitals : {}),
+        ...(canClinical ? clinical : {}),
+        ...(canVitals && hasVitals ? { vitalsRecordedById: actor.profile.id, vitalsRecordedAt: new Date() } : {}),
+      },
+    });
+    if (actor.profile.role === Role.NURSE && hasVitals) {
+      await tx.nurseAppointmentAssignment.updateMany({
+        where: {
+          appointment: { consultation: { id } },
+          nurseProfile: { staffProfileId: actor.profile.id },
+        },
+        data: { status: "IN_PROGRESS", startedAt: new Date() },
+      });
+    }
   });
 
   await recordAuditEvent({
@@ -246,11 +285,18 @@ export async function completeConsultation(
   }
 
   const { vitals, clinical } = splitDraftFields(input);
+  const hasVitals = Object.values(vitals).some((value) => value !== null && value !== undefined);
 
   await prisma.$transaction(async (tx) => {
     await tx.consultation.update({
       where: { id },
-      data: { ...vitals, ...clinical, status: "COMPLETED", completedAt: new Date() },
+      data: {
+        ...vitals,
+        ...clinical,
+        status: "COMPLETED",
+        completedAt: new Date(),
+        ...(hasVitals ? { vitalsRecordedById: actor.profile.id, vitalsRecordedAt: new Date() } : {}),
+      },
     });
 
     const appointment = await tx.appointment.findUnique({ where: { id: consultation.appointmentId } });
@@ -265,6 +311,10 @@ export async function completeConsultation(
         },
       });
     }
+    await tx.nurseAppointmentAssignment.updateMany({
+      where: { appointmentId: consultation.appointmentId, status: { not: "COMPLETED" } },
+      data: { status: "COMPLETED", completedAt: new Date() },
+    });
   });
 
   await recordAuditEvent({
@@ -283,6 +333,7 @@ export async function amendConsultation(
 ) {
   assertCan(actor.profile.role, "consultations:manage-clinical");
   const consultation = await requireConsultation(id);
+  await assertNurseAssigned(actor, consultation.appointmentId);
   assertOwnsConsultation(actor, consultation.doctor.staffProfileId);
   if (consultation.status !== "COMPLETED") {
     throw new Error("Only a completed consultation can be amended.");
@@ -301,9 +352,16 @@ export async function amendConsultation(
     const value = consultation[key];
     snapshot[key] = value instanceof Date ? value.toISOString() : value;
   }
+  const vitalsChanged = changedFields.some((field) => Object.hasOwn(vitals, field));
 
   await prisma.$transaction(async (tx) => {
-    await tx.consultation.update({ where: { id }, data: nextValues });
+    await tx.consultation.update({
+      where: { id },
+      data: {
+        ...nextValues,
+        ...(vitalsChanged ? { vitalsRecordedById: actor.profile.id, vitalsRecordedAt: new Date() } : {}),
+      },
+    });
     await tx.consultationAmendment.create({
       data: {
         consultationId: id,
@@ -335,6 +393,7 @@ export async function addAttachment(actor: CurrentUser, id: string, file: File) 
   }
 
   const consultation = await requireConsultation(id);
+  await assertNurseAssigned(actor, consultation.appointmentId);
   const { storagePath } = await uploadConsultationAttachment(id, file);
 
   await prisma.consultationAttachment.create({

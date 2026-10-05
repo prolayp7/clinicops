@@ -44,6 +44,24 @@ beforeEach(() => {
 });
 
 describe("users-service authorization", () => {
+  it("lets Receptionists view staff but always excludes Super Admin accounts", async () => {
+    await expect(listStaff(actor(Role.RECEPTIONIST), { page: 1, pageSize: 10 })).resolves.toMatchObject({
+      items: [],
+      total: 0,
+    });
+    expect(db.staffProfile.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { role: { not: Role.SUPER_ADMIN } },
+    }));
+
+    vi.clearAllMocks();
+    await expect(listStaff(actor(Role.RECEPTIONIST), {
+      role: Role.SUPER_ADMIN,
+      page: 1,
+      pageSize: 10,
+    })).resolves.toEqual({ items: [], total: 0 });
+    expect(db.staffProfile.findMany).not.toHaveBeenCalled();
+  });
+
   it.each([Role.DOCTOR, Role.RECEPTIONIST])(
     "denies staff management for %s before touching Supabase or the database",
     async (role) => {

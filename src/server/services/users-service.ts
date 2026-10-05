@@ -30,9 +30,18 @@ function assertCanManageRole(actor: CurrentUser, role: Role) {
 
 export async function listStaff(actor: CurrentUser, { search, role, status, page, pageSize }: ListStaffParams) {
   assertCan(actor.profile.role, "users:view");
+  if (actor.profile.role === Role.RECEPTIONIST && role === Role.SUPER_ADMIN) {
+    return { items: [], total: 0 };
+  }
+
+  const roleFilter: Prisma.StaffProfileWhereInput = actor.profile.role === Role.RECEPTIONIST
+    ? { role: role ?? { not: Role.SUPER_ADMIN } }
+    : role
+      ? { role }
+      : {};
 
   const where: Prisma.StaffProfileWhereInput = {
-    ...(role ? { role } : {}),
+    ...roleFilter,
     ...(status ? { status } : {}),
     ...(search
       ? {

@@ -6,6 +6,9 @@
   "engines": {
     "node": ">=20"
   },
+  "prisma": {
+    "seed": "tsx --env-file-if-exists=.env prisma/seed.ts"
+  },
   "scripts": {
     "postinstall": "prisma generate",
     "dev": "next dev",
@@ -35,6 +38,7 @@
     "nodemailer": "^10.0.10",
     "radix-ui": "^1.6.7",
     "react": "^19.1.0",
+    "react-day-picker": "^10.0.2",
     "react-dom": "^19.1.0",
     "react-hook-form": "^7.54.2",
     "recharts": "^3.10.1",

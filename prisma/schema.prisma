@@ -48,23 +48,26 @@ model StaffProfile {
   updatedAt    DateTime    @updatedAt
   archivedAt   DateTime?
 
-  auditLogs                AuditLog[]
-  doctor                   Doctor?
-  appointmentStatusChanges AppointmentStatusHistory[]
-  consultationAmendments   ConsultationAmendment[]
-  consultationAttachments  ConsultationAttachment[]
-  labOrdersPlaced          LabOrder[]                 @relation("LabOrderOrderedBy")
-  labOrdersReviewed        LabOrder[]                 @relation("LabOrderReviewedBy")
-  labOrderStatusChanges    LabOrderStatusHistory[]
-  labResultsEntered        LabOrderItem[]
-  labReportsUploaded       LabReport[]
-  invoicesCreated          Invoice[]
-  paymentsRecorded         Payment[]
-  refundsRecorded          Refund[]
-  documentsUploaded        Document[]
-  patientAccountsCreated   PatientAccount[]
-  sessions                 StaffSession[]
-  passwordResetTokens      PasswordResetToken[]
+  auditLogs                  AuditLog[]
+  doctor                     Doctor?
+  nurseProfile               NurseProfile?
+  appointmentStatusChanges   AppointmentStatusHistory[]
+  nurseAssignmentsCreated    NurseAppointmentAssignment[] @relation("NurseAssignmentCreatedBy")
+  consultationVitalsRecorded Consultation[]               @relation("ConsultationVitalsRecordedBy")
+  consultationAmendments     ConsultationAmendment[]
+  consultationAttachments    ConsultationAttachment[]
+  labOrdersPlaced            LabOrder[]                   @relation("LabOrderOrderedBy")
+  labOrdersReviewed          LabOrder[]                   @relation("LabOrderReviewedBy")
+  labOrderStatusChanges      LabOrderStatusHistory[]
+  labResultsEntered          LabOrderItem[]
+  labReportsUploaded         LabReport[]
+  invoicesCreated            Invoice[]
+  paymentsRecorded           Payment[]
+  refundsRecorded            Refund[]
+  documentsUploaded          Document[]
+  patientAccountsCreated     PatientAccount[]
+  sessions                   StaffSession[]
+  passwordResetTokens        PasswordResetToken[]
 
   @@index([role])
   @@map("staff_profiles")
@@ -171,6 +174,7 @@ model Department {
   archivedAt DateTime?
 
   doctors Doctor[]
+  nurses  NurseProfile[]
 
   @@map("departments")
 }
@@ -221,6 +225,29 @@ model Doctor {
   @@index([specializationId])
   @@index([status])
   @@map("doctors")
+}
+
+/// Staff-side nurse directory entry with a clinical unit, qualifications and recurring shift.
+model NurseProfile {
+  id             String       @id @default(uuid()) @db.Uuid
+  staffProfileId String       @unique @db.Uuid
+  employeeNumber String       @unique
+  departmentId   String       @db.Uuid
+  qualifications String[]
+  shiftStartTime DateTime     @db.Time
+  shiftEndTime   DateTime     @db.Time
+  status         RecordStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  archivedAt     DateTime?
+
+  staffProfile StaffProfile                 @relation(fields: [staffProfileId], references: [id])
+  department   Department                   @relation(fields: [departmentId], references: [id])
+  assignments  NurseAppointmentAssignment[]
+
+  @@index([departmentId])
+  @@index([status])
+  @@map("nurse_profiles")
 }
 
 /// Recurring weekly availability block. Overlap between blocks on the same day is rejected at
@@ -347,16 +374,47 @@ model Appointment {
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
 
-  patient       Patient                    @relation(fields: [patientId], references: [id])
-  doctor        Doctor                     @relation(fields: [doctorId], references: [id])
-  statusHistory AppointmentStatusHistory[]
-  reminder      AppointmentReminder?
-  consultation  Consultation?
+  patient          Patient                      @relation(fields: [patientId], references: [id])
+  doctor           Doctor                       @relation(fields: [doctorId], references: [id])
+  statusHistory    AppointmentStatusHistory[]
+  reminder         AppointmentReminder?
+  consultation     Consultation?
+  nurseAssignments NurseAppointmentAssignment[]
 
   @@index([doctorId, date])
   @@index([patientId])
   @@index([status])
   @@map("appointments")
+}
+
+enum NurseAssignmentStatus {
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+}
+
+/// A nurse's assigned work on an appointment. Multiple nurses may assist one visit, and each
+/// nurse's assignment has its own lifecycle and assigning staff member.
+model NurseAppointmentAssignment {
+  id             String                @id @default(uuid()) @db.Uuid
+  nurseProfileId String                @db.Uuid
+  appointmentId  String                @db.Uuid
+  assignedById   String                @db.Uuid
+  status         NurseAssignmentStatus @default(ASSIGNED)
+  assignedAt     DateTime              @default(now())
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  nurseProfile NurseProfile @relation(fields: [nurseProfileId], references: [id])
+  appointment  Appointment  @relation(fields: [appointmentId], references: [id])
+  assignedBy   StaffProfile @relation("NurseAssignmentCreatedBy", fields: [assignedById], references: [id])
+
+  @@unique([nurseProfileId, appointmentId])
+  @@index([appointmentId, status])
+  @@index([nurseProfileId, status])
+  @@map("nurse_appointment_assignments")
 }
 
 /// Append-only log of status transitions for one appointment, each with the reason given
@@ -410,11 +468,13 @@ enum ConsultationStatus {
 /// while DRAFT; once COMPLETED they are frozen and further changes must go through
 /// ConsultationAmendment (see `amendConsultation` in the service) rather than a silent update.
 model Consultation {
-  id            String             @id @default(uuid()) @db.Uuid
-  appointmentId String             @unique @db.Uuid
-  patientId     String             @db.Uuid
-  doctorId      String             @db.Uuid
-  status        ConsultationStatus @default(DRAFT)
+  id                 String             @id @default(uuid()) @db.Uuid
+  appointmentId      String             @unique @db.Uuid
+  patientId          String             @db.Uuid
+  doctorId           String             @db.Uuid
+  status             ConsultationStatus @default(DRAFT)
+  vitalsRecordedById String?            @db.Uuid
+  vitalsRecordedAt   DateTime?
 
   // Vitals
   bloodPressureSystolic   Int?
@@ -437,15 +497,16 @@ model Consultation {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  appointment  Appointment              @relation(fields: [appointmentId], references: [id])
-  patient      Patient                  @relation(fields: [patientId], references: [id])
-  doctor       Doctor                   @relation(fields: [doctorId], references: [id])
-  amendments   ConsultationAmendment[]
-  attachments  ConsultationAttachment[]
-  prescription Prescription?
-  labOrders    LabOrder[]
-  invoiceItems InvoiceItem[]
-  documents    Document[]
+  appointment      Appointment              @relation(fields: [appointmentId], references: [id])
+  patient          Patient                  @relation(fields: [patientId], references: [id])
+  doctor           Doctor                   @relation(fields: [doctorId], references: [id])
+  vitalsRecordedBy StaffProfile?            @relation("ConsultationVitalsRecordedBy", fields: [vitalsRecordedById], references: [id])
+  amendments       ConsultationAmendment[]
+  attachments      ConsultationAttachment[]
+  prescription     Prescription?
+  labOrders        LabOrder[]
+  invoiceItems     InvoiceItem[]
+  documents        Document[]
 
   @@index([patientId])
   @@index([doctorId])

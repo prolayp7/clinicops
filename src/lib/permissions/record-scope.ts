@@ -11,3 +11,9 @@ export function patientScope(actor: CurrentUser): Prisma.PatientWhereInput {
 export function doctorScope(actor: CurrentUser) {
   return actor.profile.role === Role.DOCTOR ? { doctor: { staffProfileId: actor.profile.id } } : {};
 }
+
+export function nurseAppointmentScope(actor: CurrentUser) {
+  return actor.profile.role === Role.NURSE
+    ? { nurseAssignments: { some: { nurseProfile: { staffProfileId: actor.profile.id, status: "ACTIVE" as const } } } }
+    : {};
+}

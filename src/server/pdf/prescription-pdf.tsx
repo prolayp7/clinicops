@@ -9,7 +9,7 @@ import type { ClinicSetting, MealInstruction, Sex } from "@prisma/client";
 const styles = StyleSheet.create({
   page: { padding: 36, fontSize: 10, fontFamily: "Helvetica", color: "#1a1a1a" },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  logo: { width: 40, height: 40, marginRight: 10 },
+  logo: { width: 120, height: 33, marginRight: 10, objectFit: "contain" },
   clinicBlock: { flexDirection: "row" },
   clinicName: { fontSize: 14, fontFamily: "Helvetica-Bold" },
   clinicDetail: { fontSize: 8, color: "#555555" },

@@ -55,10 +55,10 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           <div className="flex items-center gap-2">
             <InvoiceStatusBadge status={invoice.status} />
             <Button asChild size="sm" variant="secondary">
-              <a href={`/api/invoices/${invoice.id}/pdf`} target="_blank" rel="noreferrer">
+              <Link href={`/billing/${invoice.id}/pdf`}>
                 <Download className="size-4" />
                 Print / PDF
-              </a>
+              </Link>
             </Button>
           </div>
         </div>

@@ -11,9 +11,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { DatePicker } from "@/components/shared/date-picker";
+import { TimePicker } from "@/components/shared/time-picker";
 import { rescheduleAppointmentAction, type FormState } from "../../actions";
 
 export function RescheduleDialog({
@@ -69,20 +70,18 @@ export function RescheduleDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="reschedule-date">New date</Label>
-              <Input
+              <DatePicker
                 id="reschedule-date"
                 name="date"
-                type="date"
                 required
                 defaultValue={state.values?.date}
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="reschedule-time">New start time</Label>
-              <Input
+              <TimePicker
                 id="reschedule-time"
                 name="startTime"
-                type="time"
                 required
                 defaultValue={state.values?.startTime}
               />
@@ -106,7 +105,7 @@ export function RescheduleDialog({
                 <div className="space-y-1.5">
                   <p className="text-body text-foreground">{state.availabilityWarning}</p>
                   {canOverride && (
-                    <Button type="button" size="sm" variant="secondary" onClick={rescheduleAnyway}>
+                    <Button type="button" variant="secondary" size="sm" onClick={rescheduleAnyway}>
                       Reschedule anyway
                     </Button>
                   )}
@@ -116,10 +115,9 @@ export function RescheduleDialog({
           )}
 
           {state.error && <p className="text-destructive text-body">{state.error}</p>}
-
           <DialogFooter>
             <Button type="submit" disabled={isPending}>
-              {isPending ? "Saving…" : "Reschedule"}
+              {isPending ? "Rescheduling…" : "Reschedule appointment"}
             </Button>
           </DialogFooter>
         </form>

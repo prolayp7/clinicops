@@ -27,6 +27,43 @@ describe("STAFF_ROLES", () => {
   });
 });
 
+describe("Super Admin staff navigation", () => {
+  it("replaces the generic Users link with role-specific staff lists except Super Admin", () => {
+    const navItems = getNavItemsForRole(Role.SUPER_ADMIN);
+    const staffLinks = navItems.filter((item) => item.href.startsWith("/users?role="));
+
+    expect(navItems.map((item) => item.key)).not.toContain("users");
+    expect(navItems.map((item) => item.key)).toContain("doctors");
+    expect(staffLinks.map((item) => item.href)).toEqual([
+      "/users?role=ADMIN",
+      "/users?role=RECEPTIONIST",
+      "/users?role=NURSE",
+      "/users?role=LAB_TECHNICIAN",
+      "/users?role=ACCOUNTANT",
+    ]);
+  });
+
+  it("shows Receptionists the limited role-specific staff lists", () => {
+    const navItems = getNavItemsForRole(Role.RECEPTIONIST);
+    const staffLinks = navItems.filter((item) => item.href.startsWith("/users?role="));
+
+    expect(staffLinks.map((item) => item.href)).toEqual([
+      "/users?role=ADMIN",
+      "/users?role=RECEPTIONIST",
+      "/users?role=NURSE",
+      "/users?role=LAB_TECHNICIAN",
+      "/users?role=ACCOUNTANT",
+    ]);
+    expect(navItems.map((item) => item.key)).not.toContain("users");
+  });
+
+  it("keeps the generic Users link for Admin", () => {
+    const navItems = getNavItemsForRole(Role.ADMIN);
+    expect(navItems.map((item) => item.key)).toContain("users");
+    expect(navItems.some((item) => item.key.startsWith("user-"))).toBe(false);
+  });
+});
+
 describe("roleLabel", () => {
   it("formats an underscored role as a human-readable title", () => {
     expect(roleLabel(Role.SUPER_ADMIN)).toBe("Super Admin");

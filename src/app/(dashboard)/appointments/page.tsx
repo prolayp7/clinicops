@@ -37,11 +37,24 @@ export default async function AppointmentsPage({
   const doctorId = filters.doctorId ?? "";
   const status = filters.status;
 
-  const doctors = await prisma.doctor.findMany({
-    where: { status: "ACTIVE", ...(doctorId ? { id: doctorId } : {}) },
-    select: { id: true, fullName: true },
-    orderBy: { fullName: "asc" },
-  });
+  const [doctors, selectedDoctor] = await Promise.all([
+    prisma.doctor.findMany({
+      where: { status: "ACTIVE" },
+      select: { id: true, fullName: true },
+      orderBy: { fullName: "asc" },
+    }),
+    doctorId
+      ? prisma.doctor.findFirst({
+          where: { id: doctorId, status: "ACTIVE" },
+          select: {
+            id: true,
+            fullName: true,
+            photoUrl: true,
+            department: { select: { name: true } },
+          },
+        })
+      : Promise.resolve(null),
+  ]);
 
   const { items } = await listAppointments(actor, {
     date: view === "calendar" ? date : undefined,
@@ -68,7 +81,13 @@ export default async function AppointmentsPage({
         )}
       </div>
 
-      <AppointmentFilters date={date} doctorId={doctorId} status={status ?? ""} view={view} doctors={doctors} />
+      <AppointmentFilters
+        date={date}
+        doctorId={doctorId}
+        status={status ?? ""}
+        view={view}
+        selectedDoctor={selectedDoctor}
+      />
 
       {view === "calendar" ? (
         <CalendarView date={date} doctors={doctors} appointments={items} />

@@ -1,4 +1,4 @@
-import { doctorScope } from "@/lib/permissions/record-scope";
+import { doctorScope, nurseAppointmentScope } from "@/lib/permissions/record-scope";
 import "server-only";
 import { Prisma, type AppointmentStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
@@ -152,6 +152,7 @@ export async function listAppointments(actor: CurrentUser, params: ListAppointme
 
   const where: Prisma.AppointmentWhereInput = {
     ...doctorScope(actor),
+    ...nurseAppointmentScope(actor),
     ...(params.date ? { date: new Date(params.date) } : {}),
     ...(params.doctorId ? { doctorId: params.doctorId } : {}),
     ...(params.patientId ? { patientId: params.patientId } : {}),
@@ -179,7 +180,7 @@ export async function getAppointmentById(actor: CurrentUser, id: string) {
   assertCan(actor.profile.role, "appointments:view");
 
   return prisma.appointment.findFirst({
-    where: { id, ...doctorScope(actor) },
+    where: { id, ...doctorScope(actor), ...nurseAppointmentScope(actor) },
     include: {
       ...appointmentInclude,
       statusHistory: {
@@ -376,7 +377,9 @@ export async function changeAppointmentStatus(
 ) {
   assertCan(actor.profile.role, "appointments:manage-status");
 
-  const existing = await prisma.appointment.findFirst({ where: { id, ...doctorScope(actor) } });
+  const existing = await prisma.appointment.findFirst({
+    where: { id, ...doctorScope(actor), ...nurseAppointmentScope(actor) },
+  });
   if (!existing) throw new Error("Appointment not found.");
   if (existing.status !== input.fromStatus) {
     throw new Error("This appointment's status changed since you loaded it. Refresh and retry.");
