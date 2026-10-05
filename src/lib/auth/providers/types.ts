@@ -4,6 +4,7 @@ export type SignInResult = { ok: true; authUserId: string } | { ok: false; error
 export type AdminCreateResult = { authUserId: string; passwordHash: string | null } | { error: string };
 export type PasswordResetResult = { ok: true; authUserId: string } | { ok: false; error: string };
 export type AdminPasswordResult = { passwordHash: string | null } | { error: string };
+export type AdminEmailResult = { ok: true } | { error: string };
 
 /** Provider-agnostic identity boundary. Both staff and patient auth share this shape — the
  * logic is identical for each, only the underlying table differs (see providers/*.ts). Callers
@@ -19,6 +20,7 @@ export interface AuthProvider {
   signOut(subject: AuthSubject): Promise<void>;
   adminCreateUser(subject: AuthSubject, email: string, password: string): Promise<AdminCreateResult>;
   adminSetPassword(subject: AuthSubject, authUserId: string, password: string): Promise<AdminPasswordResult>;
+  adminUpdateEmail(subject: AuthSubject, authUserId: string, email: string): Promise<AdminEmailResult>;
   /** Staff self-service reset, step 1: emails a reset link if an ACTIVE account exists. Returns
    * the account id when known (for auditing) and null otherwise — callers must not reveal which. */
   requestPasswordReset(email: string): Promise<{ authUserId: string | null }>;

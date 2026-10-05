@@ -1,8 +1,12 @@
 import { redirect } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
+import { getEnv } from "@/lib/env";
 import { can } from "@/lib/permissions/policies";
+import { dateToIsoDateInTimeZone } from "@/lib/scheduling";
 import { prisma } from "@/lib/db/prisma";
+import { appointmentFiltersSchema } from "@/lib/validation/appointments";
+import { getClinicSettings } from "@/server/services/clinic-settings-service";
 import { BookingForm } from "../_components/booking-form";
 
 export default async function NewAppointmentPage({
@@ -17,6 +21,8 @@ export default async function NewAppointmentPage({
   const canOverride = can(actor.profile.role, "appointments:override-availability");
 
   const params = await searchParams;
+  const parsedFilters = appointmentFiltersSchema.safeParse(params);
+  const filters = parsedFilters.success ? parsedFilters.data : {};
 
   const [patients, doctors] = await Promise.all([
     prisma.patient.findMany({
@@ -30,6 +36,9 @@ export default async function NewAppointmentPage({
       orderBy: { fullName: "asc" },
     }),
   ]);
+  const clinicSettings = await getClinicSettings();
+  const timeZone = clinicSettings?.timezone ?? getEnv().CLINIC_TIMEZONE;
+  const defaultDate = filters.date ?? dateToIsoDateInTimeZone(new Date(), timeZone);
 
   return (
     <div className="space-y-4">
@@ -44,8 +53,8 @@ export default async function NewAppointmentPage({
           patients={patients}
           doctors={doctors}
           canOverride={canOverride}
-          defaultDoctorId={params.doctorId}
-          defaultDate={params.date}
+          defaultDoctorId={filters.doctorId}
+          defaultDate={defaultDate}
         />
       </Card>
     </div>

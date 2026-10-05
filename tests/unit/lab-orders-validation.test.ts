@@ -3,6 +3,7 @@ import { labTestSchema } from "@/lib/validation/lab-tests";
 import {
   changeLabOrderStatusSchema,
   createLabOrderSchema,
+  labOrderListFiltersSchema,
   labResultItemSchema,
   saveResultsSchema,
 } from "@/lib/validation/lab-orders";
@@ -129,5 +130,17 @@ describe("labResultItemSchema / saveResultsSchema", () => {
   it("requires at least one item in the batch save", () => {
     expect(saveResultsSchema.safeParse({ items: [] }).success).toBe(false);
     expect(saveResultsSchema.safeParse({ items: [validItem] }).success).toBe(true);
+  });
+});
+
+describe("labOrderListFiltersSchema", () => {
+  it("trims search and validates status and pagination", () => {
+    expect(labOrderListFiltersSchema.parse({ search: "  PT-000001 ", status: "REVIEWED", page: "2" })).toEqual({
+      search: "PT-000001",
+      status: "REVIEWED",
+      page: 2,
+    });
+    expect(labOrderListFiltersSchema.safeParse({ status: "UNKNOWN" }).success).toBe(false);
+    expect(labOrderListFiltersSchema.parse({ page: "invalid" }).page).toBe(1);
   });
 });

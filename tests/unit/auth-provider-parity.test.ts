@@ -20,6 +20,7 @@ const AUTH_METHODS: (keyof AuthProvider)[] = [
   "signOut",
   "adminCreateUser",
   "adminSetPassword",
+  "adminUpdateEmail",
 ];
 
 const STORAGE_METHODS: (keyof StorageProvider)[] = [

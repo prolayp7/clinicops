@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bookAppointmentSchema,
   changeStatusSchema,
+  appointmentFiltersSchema,
   rescheduleAppointmentSchema,
 } from "@/lib/validation/appointments";
 
@@ -88,5 +89,32 @@ describe("changeStatusSchema", () => {
       reason: "Patient called to cancel",
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("appointmentFiltersSchema", () => {
+  it("accepts valid calendar and list filters", () => {
+    expect(appointmentFiltersSchema.safeParse({
+      view: "list",
+      date: "2026-09-14",
+      doctorId: "8f14e45f-ceea-467e-a3d8-4d3f9e2e6b3b",
+      status: "SCHEDULED",
+    }).success).toBe(true);
+  });
+
+  it("rejects malformed dates, doctor IDs, statuses and views", () => {
+    expect(appointmentFiltersSchema.safeParse({ date: "not-a-date" }).success).toBe(false);
+    expect(appointmentFiltersSchema.safeParse({ doctorId: "not-a-uuid" }).success).toBe(false);
+    expect(appointmentFiltersSchema.safeParse({ status: "UNKNOWN" }).success).toBe(false);
+    expect(appointmentFiltersSchema.safeParse({ view: "week" }).success).toBe(false);
+  });
+
+  it("treats blank optional filters as absent", () => {
+    expect(appointmentFiltersSchema.parse({ date: "", doctorId: "", status: "" })).toEqual({
+      view: undefined,
+      date: undefined,
+      doctorId: undefined,
+      status: undefined,
+    });
   });
 });

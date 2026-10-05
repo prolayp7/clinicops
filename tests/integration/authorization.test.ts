@@ -3,6 +3,10 @@ import { Role } from "@prisma/client";
 import type { CurrentUser } from "@/lib/auth/session";
 
 vi.mock("server-only", () => ({}));
+const auditMocks = vi.hoisted(() => ({
+  recordAuditEvent: vi.fn(),
+  getDocumentSignedUrl: vi.fn().mockResolvedValue("https://files.example.test/signed"),
+}));
 const db = vi.hoisted(() => ({
   patient: { findMany: vi.fn(), count: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   document: { findMany: vi.fn(), count: vi.fn() },
@@ -12,12 +16,12 @@ const db = vi.hoisted(() => ({
   payment: { findFirst: vi.fn() },
 }));
 vi.mock("@/lib/db/prisma", () => ({ prisma: db }));
-vi.mock("@/lib/storage", () => ({ getDocumentSignedUrl: vi.fn(), ALLOWED_DOCUMENT_TYPES: new Set(), MAX_DOCUMENT_BYTES: 10, uploadDocument: vi.fn() }));
-vi.mock("@/server/services/audit-service", () => ({ recordAuditEvent: vi.fn() }));
+vi.mock("@/lib/storage", () => ({ getDocumentSignedUrl: auditMocks.getDocumentSignedUrl, ALLOWED_DOCUMENT_TYPES: new Set(), MAX_DOCUMENT_BYTES: 10, uploadDocument: vi.fn() }));
+vi.mock("@/server/services/audit-service", () => ({ recordAuditEvent: auditMocks.recordAuditEvent }));
 vi.mock("@/server/services/appointments-service", () => ({ requestAppointment: vi.fn() }));
 import { getPatientById, listPatients, updatePatientClinical } from "@/server/services/patients-service";
 import { listDocuments } from "@/server/services/documents-service";
-import { getPortalPrescriptionById, getPortalLabOrderById, getPortalInvoiceById, getPortalPaymentById } from "@/server/services/portal-service";
+import { getPortalPrescriptionById, getPortalLabOrderById, getPortalInvoiceById, getPortalPaymentById, listPortalDocuments } from "@/server/services/portal-service";
 
 const actor = (role: Role) => ({ profile: { id: "doctor-session", role } }) as CurrentUser;
 beforeEach(() => {
@@ -48,6 +52,32 @@ describe("service authorization boundaries (mocked database)", () => {
   it("scopes documents before signing any download", async () => {
     await listDocuments(actor(Role.DOCTOR), {});
     expect(db.document.findMany.mock.calls[0]![0].where.patient.appointments.some.doctor.staffProfileId).toBe("doctor-session");
+  });
+  it("audits staff document URL issuance without storing file details", async () => {
+    db.document.findMany.mockResolvedValue([{ id: "doc-1", storagePath: "private/object" }]);
+
+    await listDocuments(actor(Role.DOCTOR), {});
+
+    expect(auditMocks.recordAuditEvent).toHaveBeenCalledWith({
+      actorId: "doctor-session",
+      actorRole: Role.DOCTOR,
+      action: "document.accessed",
+      entityType: "Document",
+      entityId: "doc-1",
+    });
+  });
+  it("audits patient portal document URL issuance", async () => {
+    db.document.findMany.mockResolvedValue([{ id: "doc-portal-1", storagePath: "private/object" }]);
+
+    await listPortalDocuments("patient-1");
+
+    expect(auditMocks.recordAuditEvent).toHaveBeenCalledWith({
+      actorId: null,
+      actorRole: Role.PATIENT,
+      action: "patient.document_accessed",
+      entityType: "Document",
+      entityId: "doc-portal-1",
+    });
   });
   it("enforces portal ownership and release in database predicates", async () => {
     await getPortalPrescriptionById("own", "other");

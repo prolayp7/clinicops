@@ -37,3 +37,23 @@ export const changeStatusSchema = z
     path: ["reason"],
   });
 export type ChangeStatusInput = z.infer<typeof changeStatusSchema>;
+
+const optionalDateParam = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().date().optional(),
+);
+const optionalDoctorParam = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().uuid().optional(),
+);
+const optionalStatusParam = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.nativeEnum(AppointmentStatus).optional(),
+);
+
+export const appointmentFiltersSchema = z.object({
+  view: z.enum(["calendar", "list"]).optional(),
+  date: optionalDateParam,
+  doctorId: optionalDoctorParam,
+  status: optionalStatusParam,
+});

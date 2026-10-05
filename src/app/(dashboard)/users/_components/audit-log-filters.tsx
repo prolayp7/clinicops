@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { roleLabel, STAFF_ROLES } from "@/lib/permissions/roles";
+import { ALL_ROLES, roleLabel } from "@/lib/permissions/roles";
 
 export function AuditLogFilters({
   search,
@@ -48,7 +48,7 @@ export function AuditLogFilters({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All roles</SelectItem>
-          {STAFF_ROLES.map((role) => (
+          {ALL_ROLES.map((role) => (
             <SelectItem key={role} value={role}>
               {roleLabel(role)}
             </SelectItem>

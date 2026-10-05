@@ -8,9 +8,12 @@ for (const width of [360, 768, 1024, 1440]) {
     expect(response?.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
     const email = page.getByLabel("Work Email", { exact: true });
     const password = page.getByLabel("Password", { exact: true });
+    const forgotPassword = page.getByRole("link", { name: "Forgot password?" });
     await expect(email).toBeVisible();
     await expect(password).toBeVisible();
     await email.focus();
+    await page.keyboard.press("Tab");
+    await expect(forgotPassword).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(password).toBeFocused();
     await page.keyboard.press("Tab");

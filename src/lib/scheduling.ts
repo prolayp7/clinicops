@@ -13,6 +13,44 @@ export function dateToTimeString(date: Date): string {
   return `${hours}:${minutes}`;
 }
 
+export function dateToIsoDateInTimeZone(date: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
+export function clinicDateTimeToUtc(date: string, time: string, timeZone: string): Date {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const requested = Date.UTC(year!, month! - 1, day!, hour!, minute!);
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  let candidate = requested;
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const parts = formatter.formatToParts(new Date(candidate));
+    const value = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+    const displayedAsUtc = Date.UTC(value("year"), value("month") - 1, value("day"), value("hour"), value("minute"));
+    const correction = requested - displayedAsUtc;
+    if (correction === 0) return new Date(candidate);
+    candidate += correction;
+  }
+
+  throw new Error("This appointment time does not exist in the clinic timezone.");
+}
+
 export type TimeRange = { startTime: string; endTime: string };
 
 /** Half-open interval overlap: [a.start, a.end) intersects [b.start, b.end). */

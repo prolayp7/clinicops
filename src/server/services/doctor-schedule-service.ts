@@ -67,7 +67,8 @@ export async function removeAvailabilitySlot(actor: CurrentUser, doctorId: strin
   const doctor = await requireDoctor(doctorId);
   assertCanManageSchedule(actor, doctor);
 
-  await prisma.doctorAvailability.delete({ where: { id: slotId } });
+  const deleted = await prisma.doctorAvailability.deleteMany({ where: { id: slotId, doctorId } });
+  if (deleted.count !== 1) throw new Error("Availability block not found for this doctor.");
 
   await recordAuditEvent({
     actorId: actor.profile.id,
@@ -122,7 +123,8 @@ export async function removeLeave(actor: CurrentUser, doctorId: string, leaveId:
   const doctor = await requireDoctor(doctorId);
   assertCanManageSchedule(actor, doctor);
 
-  await prisma.doctorLeave.delete({ where: { id: leaveId } });
+  const deleted = await prisma.doctorLeave.deleteMany({ where: { id: leaveId, doctorId } });
+  if (deleted.count !== 1) throw new Error("Leave entry not found for this doctor.");
 
   await recordAuditEvent({
     actorId: actor.profile.id,

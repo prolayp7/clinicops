@@ -1,8 +1,12 @@
 import "server-only";
-import type { Prisma } from "@prisma/client";
+import { Role, type Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { getEnv } from "@/lib/env";
+import { dateToIsoDateInTimeZone } from "@/lib/scheduling";
 import { requestAppointment, type RequestAppointmentInput } from "@/server/services/appointments-service";
 import { getDocumentSignedUrl } from "@/lib/storage";
+import { recordAuditEvent } from "@/server/services/audit-service";
+import { getClinicSettings } from "@/server/services/clinic-settings-service";
 import { normalizeEmail, normalizePhone } from "@/lib/patients";
 import type { CurrentPatient } from "@/lib/auth/patient-session";
 import type { UpdatePortalProfileInput } from "@/lib/validation/portal";
@@ -13,9 +17,12 @@ import type { UpdatePortalProfileInput } from "@/lib/validation/portal";
  * for the portal: one rule, no exceptions, enforced the same way everywhere. */
 
 export async function getPortalDashboard(patientId: string) {
+  const clinicSettings = await getClinicSettings();
+  const timeZone = clinicSettings?.timezone ?? getEnv().CLINIC_TIMEZONE;
+  const today = new Date(`${dateToIsoDateInTimeZone(new Date(), timeZone)}T00:00:00.000Z`);
   const [nextAppointment, latestPrescription, latestLabOrder, latestInvoice] = await Promise.all([
     prisma.appointment.findFirst({
-      where: { patientId, status: { in: ["SCHEDULED", "CONFIRMED"] }, date: { gte: new Date() } },
+      where: { patientId, status: { in: ["SCHEDULED", "CONFIRMED"] }, date: { gte: today } },
       include: { doctor: { select: { fullName: true } } },
       orderBy: [{ date: "asc" }, { startTime: "asc" }],
     }),
@@ -110,7 +117,17 @@ export async function listPortalDocuments(patientId: string) {
     orderBy: { createdAt: "desc" },
   });
   return Promise.all(
-    documents.map(async (doc) => ({ ...doc, signedUrl: await getDocumentSignedUrl(doc.storagePath) })),
+    documents.map(async (doc) => {
+      const signedUrl = await getDocumentSignedUrl(doc.storagePath);
+      await recordAuditEvent({
+        actorId: null,
+        actorRole: Role.PATIENT,
+        action: "patient.document_accessed",
+        entityType: "Document",
+        entityId: doc.id,
+      });
+      return { ...doc, signedUrl };
+    }),
   );
 }
 

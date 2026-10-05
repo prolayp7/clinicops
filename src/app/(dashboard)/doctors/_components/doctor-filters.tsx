@@ -1,5 +1,6 @@
 "use client";
 
+import { Search } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import {
@@ -39,12 +40,15 @@ export function DoctorFilters({
 
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <Input
-        placeholder="Search by name, email or license..."
-        defaultValue={search}
-        onChange={(e) => updateParam("search", e.target.value)}
-        className="max-w-xs"
-      />
+      <div className="relative max-w-xs flex-1">
+        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-[18px] -translate-y-1/2" />
+        <Input
+          placeholder="Search by name, email or license..."
+          defaultValue={search}
+          onChange={(e) => updateParam("search", e.target.value)}
+          className="pl-9"
+        />
+      </div>
       <Select value={departmentId || "all"} onValueChange={(v) => updateParam("department", v === "all" ? "" : v)}>
         <SelectTrigger className="w-48">
           <SelectValue placeholder="Department" />

@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
 import { can } from "@/lib/permissions/policies";
 import { calculateAge } from "@/lib/patients";
+import { patientListFiltersSchema } from "@/lib/validation/patients";
 import { listPatients } from "@/server/services/patients-service";
 import { PatientFilters } from "./_components/patient-filters";
 
@@ -29,9 +30,10 @@ export default async function PatientsPage({
   const canManage = can(actor.profile.role, "patients:manage");
 
   const params = await searchParams;
-  const search = params.search ?? "";
-  const status = (params.status as "ACTIVE" | "ARCHIVED" | undefined) || "ACTIVE";
-  const page = Math.max(1, Number(params.page) || 1);
+  const filters = patientListFiltersSchema.safeParse(params);
+  const search = filters.success ? filters.data.search : "";
+  const status = filters.success ? filters.data.status : "ACTIVE";
+  const page = filters.success ? filters.data.page : 1;
 
   const { items, total } = await listPatients(actor, { search, status, page, pageSize: PAGE_SIZE });
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));

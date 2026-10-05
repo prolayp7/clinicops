@@ -103,6 +103,10 @@ export const selfhostedAuthProvider: AuthProvider = {
     return { passwordHash };
   },
 
+  async adminUpdateEmail() {
+    return { ok: true };
+  },
+
   async requestPasswordReset(email) {
     const staff = await prisma.staffProfile.findUnique({ where: { email } });
     if (!staff || staff.status !== "ACTIVE" || !staff.passwordHash) return { authUserId: null };

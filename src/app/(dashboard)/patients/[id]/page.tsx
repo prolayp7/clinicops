@@ -33,15 +33,6 @@ function initialsOf(first: string, last: string) {
   return `${first[0] ?? ""}${last[0] ?? ""}`.toUpperCase();
 }
 
-const AUDIT_ACTION_LABELS: Record<string, string> = {
-  "patient.viewed": "Profile viewed",
-  "patient.created": "Patient registered",
-  "patient.updated": "Demographics updated",
-  "patient.clinical_updated": "Medical history updated",
-  "patient.archived": "Patient archived",
-  "patient.unarchived": "Patient reactivated",
-};
-
 export default async function PatientProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await getCurrentUser();
   if (!actor || !can(actor.profile.role, "patients:view")) {
@@ -62,7 +53,7 @@ export default async function PatientProfilePage({ params }: { params: Promise<{
   const canViewDocuments = can(actor.profile.role, "documents:view");
   const canManageDocuments = can(actor.profile.role, "documents:manage");
   const canManagePortalAccess = can(actor.profile.role, "patients:manage-portal-access");
-  const timeline = can(actor.profile.role, "audit-logs:view") ? await getPatientTimeline(actor, id) : [];
+  const timeline = await getPatientTimeline(actor, id);
   const appointments = canViewAppointments
     ? (await listAppointments(actor, { patientId: id, pageSize: 100 })).items
     : [];
@@ -190,18 +181,20 @@ export default async function PatientProfilePage({ params }: { params: Promise<{
               <ol className="border-border relative space-y-4 border-l pl-6">
                 {timeline.map((event) => (
                   <li key={event.id} className="relative">
-                    <span className="bg-primary ring-card absolute top-1 -left-[27px] size-3 rounded-full ring-4" />
-                    <div className="flex items-center justify-between">
-                      <span className="text-body text-foreground font-semibold">
-                        {AUDIT_ACTION_LABELS[event.action] ?? event.action}
-                      </span>
-                      <span className="text-caption text-muted-foreground">
-                        {event.createdAt.toISOString().replace("T", " ").slice(0, 16)} UTC
-                      </span>
+                    <span className="bg-primary ring-card absolute top-1 -left-6.75 size-3 rounded-full ring-4" />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{event.type.replaceAll("_", " ")}</Badge>
+                      <Badge variant="secondary">{event.status.replaceAll("_", " ")}</Badge>
+                      <time dateTime={event.occurredAt.toISOString()} className="text-caption text-muted-foreground">
+                        {event.type === "APPOINTMENT"
+                          ? event.occurredAt.toISOString().slice(0, 10)
+                          : `${event.occurredAt.toISOString().replace("T", " ").slice(0, 16)} UTC`}
+                      </time>
                     </div>
-                    <span className="text-caption text-muted-foreground">
-                      {event.actor ? `${event.actor.fullName} (${event.actor.role})` : "System"}
-                    </span>
+                    <Link href={event.href} className="text-body text-foreground mt-1 block font-semibold hover:underline">
+                      {event.title}
+                    </Link>
+                    {event.description && <p className="text-caption text-muted-foreground">{event.description}</p>}
                   </li>
                 ))}
               </ol>

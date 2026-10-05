@@ -20,7 +20,7 @@ export default async function NewStaffPage() {
         </p>
       </div>
       <Card className="p-6">
-        <CreateStaffForm />
+        <CreateStaffForm allowSuperAdminRole={actor.profile.role === "SUPER_ADMIN"} />
       </Card>
     </div>
   );

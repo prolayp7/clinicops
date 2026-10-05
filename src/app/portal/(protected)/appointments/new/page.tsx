@@ -1,18 +1,26 @@
 import { redirect } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { getCurrentPatient } from "@/lib/auth/patient-session";
+import { getEnv } from "@/lib/env";
+import { dateToIsoDateInTimeZone } from "@/lib/scheduling";
 import { prisma } from "@/lib/db/prisma";
+import { getClinicSettings } from "@/server/services/clinic-settings-service";
 import { RequestAppointmentForm } from "../_components/request-appointment-form";
 
 export default async function NewPortalAppointmentPage() {
   const patient = await getCurrentPatient();
   if (!patient) redirect("/portal/login");
 
-  const doctors = await prisma.doctor.findMany({
-    where: { status: "ACTIVE" },
-    select: { id: true, fullName: true, specialization: { select: { name: true } } },
-    orderBy: { fullName: "asc" },
-  });
+  const [doctors, clinicSettings] = await Promise.all([
+    prisma.doctor.findMany({
+      where: { status: "ACTIVE" },
+      select: { id: true, fullName: true, specialization: { select: { name: true } } },
+      orderBy: { fullName: "asc" },
+    }),
+    getClinicSettings(),
+  ]);
+  const timeZone = clinicSettings?.timezone ?? getEnv().CLINIC_TIMEZONE;
+  const defaultDate = dateToIsoDateInTimeZone(new Date(), timeZone);
 
   return (
     <div className="space-y-4">
@@ -23,7 +31,7 @@ export default async function NewPortalAppointmentPage() {
         </p>
       </div>
       <Card className="max-w-xl p-6">
-        <RequestAppointmentForm doctors={doctors} />
+        <RequestAppointmentForm doctors={doctors} defaultDate={defaultDate} />
       </Card>
     </div>
   );

@@ -312,3 +312,18 @@ describe("Phase 8 document, report and portal-administration policies", () => {
     expect(can(Role.NURSE, "patients:manage-portal-access")).toBe(false);
   });
 });
+
+describe("staff administration policy", () => {
+  it("allows Admin and Super Admin to manage staff while denying operational roles", () => {
+    expect(can(Role.SUPER_ADMIN, "users:manage")).toBe(true);
+    expect(can(Role.ADMIN, "users:manage")).toBe(true);
+    for (const role of [Role.DOCTOR, Role.RECEPTIONIST, Role.NURSE, Role.LAB_TECHNICIAN, Role.ACCOUNTANT, Role.PATIENT]) {
+      expect(can(role, "users:manage")).toBe(false);
+    }
+  });
+
+  it("allows both administrator roles to view activity logs", () => {
+    expect(can(Role.SUPER_ADMIN, "audit-logs:view")).toBe(true);
+    expect(can(Role.ADMIN, "audit-logs:view")).toBe(true);
+  });
+});

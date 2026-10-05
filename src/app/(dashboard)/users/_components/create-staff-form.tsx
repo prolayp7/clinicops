@@ -16,7 +16,7 @@ import { TemporaryPasswordNotice } from "@/components/shared/temporary-password-
 import { roleLabel, STAFF_ROLES } from "@/lib/permissions/roles";
 import { createStaffAction, type StaffFormState } from "../actions";
 
-export function CreateStaffForm() {
+export function CreateStaffForm({ allowSuperAdminRole = false }: { allowSuperAdminRole?: boolean }) {
   const [state, formAction, isPending] = useActionState<StaffFormState, FormData>(
     createStaffAction,
     { error: null },
@@ -50,7 +50,7 @@ export function CreateStaffForm() {
             <SelectValue placeholder="Select a role" />
           </SelectTrigger>
           <SelectContent>
-            {STAFF_ROLES.map((role) => (
+            {STAFF_ROLES.filter((role) => allowSuperAdminRole || role !== "SUPER_ADMIN").map((role) => (
               <SelectItem key={role} value={role}>
                 {roleLabel(role)}
               </SelectItem>

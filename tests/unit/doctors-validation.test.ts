@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Weekday } from "@prisma/client";
-import { availabilitySchema, doctorSchema, leaveSchema, nameOnlySchema } from "@/lib/validation/doctors";
+import { availabilitySchema, clinicSettingSchema, doctorSchema, leaveSchema, nameOnlySchema } from "@/lib/validation/doctors";
 
 describe("nameOnlySchema", () => {
   it("rejects a too-short name", () => {
@@ -10,6 +10,13 @@ describe("nameOnlySchema", () => {
   it("accepts a trimmed valid name", () => {
     const result = nameOnlySchema.safeParse({ name: "  Cardiology  " });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("clinicSettingSchema timezone", () => {
+  it("requires a valid IANA timezone", () => {
+    expect(clinicSettingSchema.shape.timezone.safeParse("America/New_York").success).toBe(true);
+    expect(clinicSettingSchema.shape.timezone.safeParse("not/a-timezone").success).toBe(false);
   });
 });
 

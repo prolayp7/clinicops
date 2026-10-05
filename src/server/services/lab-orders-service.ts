@@ -55,6 +55,7 @@ const labOrderInclude = {
 } satisfies Prisma.LabOrderInclude;
 
 export type ListLabOrdersParams = {
+  search?: string;
   patientId?: string;
   orderedById?: string;
   consultationId?: string;
@@ -69,13 +70,23 @@ export async function listLabOrders(actor: CurrentUser, params: ListLabOrdersPar
   const where: Prisma.LabOrderWhereInput = {
     patient: patientScope(actor),
     ...(params.patientId ? { patientId: params.patientId } : {}),
+    ...(params.search
+      ? {
+          OR: [
+            { orderNumber: { contains: params.search, mode: "insensitive" } },
+            { patient: { is: { patientId: { contains: params.search, mode: "insensitive" } } } },
+            { patient: { is: { firstName: { contains: params.search, mode: "insensitive" } } } },
+            { patient: { is: { lastName: { contains: params.search, mode: "insensitive" } } } },
+          ],
+        }
+      : {}),
     ...(params.orderedById ? { orderedById: params.orderedById } : {}),
     ...(params.consultationId ? { consultationId: params.consultationId } : {}),
     ...(params.status ? { status: params.status } : {}),
   };
 
-  const page = params.page ?? 1;
-  const pageSize = params.pageSize ?? 50;
+  const page = Math.max(1, params.page ?? 1);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 50));
 
   const [items, total] = await Promise.all([
     prisma.labOrder.findMany({
@@ -156,8 +167,11 @@ export async function createLabOrder(actor: CurrentUser, input: CreateLabOrderIn
   return order;
 }
 
-async function requireOrder(id: string) {
-  const order = await prisma.labOrder.findUnique({ where: { id }, include: { items: true } });
+async function requireOrder(actor: CurrentUser, id: string) {
+  const order = await prisma.labOrder.findFirst({
+    where: { id, patient: patientScope(actor) },
+    include: { items: true },
+  });
   if (!order) throw new Error("Lab order not found.");
   return order;
 }
@@ -185,7 +199,7 @@ export async function changeLabOrderStatus(
   id: string,
   input: ChangeLabOrderStatusInput,
 ) {
-  const order = await requireOrder(id);
+  const order = await requireOrder(actor, id);
   assertCanTransition(actor, order, input.toStatus);
 
   if (order.status !== input.fromStatus) {
@@ -198,27 +212,35 @@ export async function changeLabOrderStatus(
     throw new Error("Enter a result for every test before marking this order complete.");
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const next = await tx.labOrder.update({
-      where: { id },
-      data: {
-        status: input.toStatus,
-        ...(input.toStatus === "REVIEWED"
-          ? { reviewedAt: new Date(), reviewedById: actor.profile.id }
-          : {}),
-      },
+  let updated;
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      const next = await tx.labOrder.update({
+        where: { id, status: input.fromStatus },
+        data: {
+          status: input.toStatus,
+          ...(input.toStatus === "REVIEWED"
+            ? { reviewedAt: new Date(), reviewedById: actor.profile.id }
+            : {}),
+        },
+      });
+      await tx.labOrderStatusHistory.create({
+        data: {
+          labOrderId: id,
+          fromStatus: input.fromStatus,
+          toStatus: input.toStatus,
+          reason: input.reason || null,
+          changedById: actor.profile.id,
+        },
+      });
+      return next;
     });
-    await tx.labOrderStatusHistory.create({
-      data: {
-        labOrderId: id,
-        fromStatus: input.fromStatus,
-        toStatus: input.toStatus,
-        reason: input.reason || null,
-        changedById: actor.profile.id,
-      },
-    });
-    return next;
-  });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+      throw new Error("This order's status changed since you loaded it. Refresh and retry.");
+    }
+    throw error;
+  }
 
   await recordAuditEvent({
     actorId: actor.profile.id,
@@ -234,7 +256,7 @@ export async function changeLabOrderStatus(
 
 export async function saveResults(actor: CurrentUser, id: string, input: SaveResultsInput) {
   assertCan(actor.profile.role, "laboratory:manage-samples");
-  const order = await requireOrder(id);
+  const order = await requireOrder(actor, id);
   if (order.status !== "PROCESSING") {
     throw new Error("Move this order to Processing before entering results.");
   }
@@ -271,7 +293,7 @@ export async function saveResults(actor: CurrentUser, id: string, input: SaveRes
 
 export async function addLabReport(actor: CurrentUser, id: string, file: File) {
   assertCan(actor.profile.role, "laboratory:manage-samples");
-  const order = await requireOrder(id);
+  const order = await requireOrder(actor, id);
   if (order.status === "CANCELLED") {
     throw new Error("Cannot attach a report to a cancelled order.");
   }

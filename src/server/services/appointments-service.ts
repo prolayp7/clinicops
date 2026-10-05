@@ -37,10 +37,35 @@ export class AvailabilityWarningError extends Error {
   }
 }
 
+function isAppointmentOverlapConstraintError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const databaseError = error as { code?: unknown; message?: unknown; meta?: unknown };
+  if (databaseError.code !== "P2004") return false;
+  const details = `${String(databaseError.message ?? "")} ${JSON.stringify(databaseError.meta ?? {})}`;
+  return details.includes("appointments_no_doctor_overlap");
+}
+
+async function withAppointmentConflictMapping<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (isAppointmentOverlapConstraintError(error)) throw new AppointmentConflictError();
+    throw error;
+  }
+}
+
 const appointmentInclude = {
   patient: { select: { id: true, patientId: true, firstName: true, lastName: true, phone: true } },
   doctor: { select: { id: true, fullName: true, slotDurationMinutes: true } },
 } satisfies Prisma.AppointmentInclude;
+
+async function assertPatientCanBook(patientId: string) {
+  const patient = await prisma.patient.findFirst({
+    where: { id: patientId, status: "ACTIVE" },
+    select: { id: true },
+  });
+  if (!patient) throw new Error("Patient not found or archived.");
+}
 
 async function assertNoHardConflict(
   doctorId: string,
@@ -172,6 +197,7 @@ export async function bookAppointment(
   options: { force?: boolean } = {},
 ) {
   assertCan(actor.profile.role, "appointments:manage");
+  await assertPatientCanBook(input.patientId);
 
   const doctor = await prisma.doctor.findUnique({ where: { id: input.doctorId } });
   if (!doctor || doctor.status !== "ACTIVE") throw new Error("Doctor not found or archived.");
@@ -190,7 +216,7 @@ export async function bookAppointment(
 
   const status = initialStatusForSource(input.source);
 
-  const appointment = await prisma.$transaction(async (tx) => {
+  const appointment = await withAppointmentConflictMapping(() => prisma.$transaction(async (tx) => {
     const created = await tx.appointment.create({
       data: {
         patientId: input.patientId,
@@ -214,7 +240,7 @@ export async function bookAppointment(
     });
 
     return created;
-  });
+  }));
 
   if (status === "SCHEDULED") {
     await scheduleReminder(appointment.id);
@@ -239,6 +265,7 @@ export type RequestAppointmentInput = Omit<BookAppointmentInput, "patientId" | "
  * client-supplied value) and never overridable — a portal patient can never book outside
  * availability. Shares the exact same hard-conflict check as staff booking. */
 export async function requestAppointment(patientId: string, input: RequestAppointmentInput) {
+  await assertPatientCanBook(patientId);
   const doctor = await prisma.doctor.findUnique({ where: { id: input.doctorId } });
   if (!doctor || doctor.status !== "ACTIVE") throw new Error("Doctor not found or archived.");
 
@@ -247,7 +274,7 @@ export async function requestAppointment(patientId: string, input: RequestAppoin
   await assertNoHardConflict(input.doctorId, input.date, input.startTime, endTime);
   await assertWithinAvailability(input.doctorId, input.date, input.startTime, endTime);
 
-  const appointment = await prisma.$transaction(async (tx) => {
+    const appointment = await withAppointmentConflictMapping(() => prisma.$transaction(async (tx) => {
     const created = await tx.appointment.create({
       data: {
         patientId,
@@ -266,7 +293,7 @@ export async function requestAppointment(patientId: string, input: RequestAppoin
     });
 
     return created;
-  });
+  }));
 
   await recordAuditEvent({
     actorId: null,
@@ -290,8 +317,8 @@ export async function rescheduleAppointment(
 
   const existing = await prisma.appointment.findUnique({ where: { id }, include: { doctor: true } });
   if (!existing) throw new Error("Appointment not found.");
-  if (isTerminalStatus(existing.status)) {
-    throw new Error("This appointment can no longer be rescheduled.");
+  if (!(["REQUESTED", "SCHEDULED", "CONFIRMED"] as const).includes(existing.status as "REQUESTED" | "SCHEDULED" | "CONFIRMED")) {
+    throw new Error("This appointment can no longer be rescheduled after the visit has started or closed.");
   }
 
   const endTime = addMinutesToTimeString(input.startTime, existing.doctor.slotDurationMinutes);
@@ -309,14 +336,16 @@ export async function rescheduleAppointment(
   const oldDate = existing.date.toISOString().slice(0, 10);
   const oldStartTime = dateToTimeString(existing.startTime);
 
-  const appointment = await prisma.appointment.update({
-    where: { id },
-    data: {
-      date: new Date(input.date),
-      startTime: timeStringToDate(input.startTime),
-      endTime: timeStringToDate(endTime),
-    },
-  });
+  const appointment = await withAppointmentConflictMapping(() =>
+    prisma.appointment.update({
+      where: { id },
+      data: {
+        date: new Date(input.date),
+        startTime: timeStringToDate(input.startTime),
+        endTime: timeStringToDate(endTime),
+      },
+    }),
+  );
 
   if (existing.status === "SCHEDULED" || existing.status === "CONFIRMED") {
     await scheduleReminder(id);

@@ -7,6 +7,7 @@ const envSchema = z
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
     DATABASE_URL: z.string().min(1),
     CLINIC_TIMEZONE: z.string().min(1).default("America/New_York"),
+    CRON_SECRET: z.string().min(32).optional(),
     AUTH_PROVIDER: z.enum(["supabase", "selfhosted"]).default("supabase"),
     STORAGE_PROVIDER: z.enum(["supabase", "selfhosted"]).default("supabase"),
     LOCAL_STORAGE_ROOT: z.string().min(1).optional(),

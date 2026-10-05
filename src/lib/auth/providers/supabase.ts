@@ -44,6 +44,12 @@ export const supabaseAuthProvider: AuthProvider = {
     return { passwordHash: null };
   },
 
+  async adminUpdateEmail(_subject, authUserId, email) {
+    const { error } = await adminClient().auth.admin.updateUserById(authUserId, { email, email_confirm: true });
+    if (error) return { error: error.message };
+    return { ok: true };
+  },
+
   async requestPasswordReset(email) {
     const appUrl = process.env.APP_URL;
     if (!appUrl) throw new Error("APP_URL is not configured.");

@@ -1,12 +1,17 @@
-import { Sex } from "@prisma/client";
+import { RecordStatus, Sex } from "@prisma/client";
 import { z } from "zod";
+
+const phoneSchema = z.string().trim().min(7).max(30).refine(
+  (phone) => phone.replace(/\D/g, "").length >= 7,
+  "Enter a phone number containing at least 7 digits.",
+);
 
 export const patientDemographicsSchema = z.object({
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
   dateOfBirth: z.string().date(),
   sex: z.nativeEnum(Sex),
-  phone: z.string().trim().min(7).max(30),
+  phone: phoneSchema,
   email: z.string().trim().email().optional().or(z.literal("")),
   addressLine1: z.string().trim().max(200).optional().or(z.literal("")),
   addressLine2: z.string().trim().max(200).optional().or(z.literal("")),
@@ -30,3 +35,9 @@ export type PatientClinicalInput = z.infer<typeof patientClinicalSchema>;
 
 export const patientRegistrationSchema = patientDemographicsSchema.merge(patientClinicalSchema);
 export type PatientRegistrationInput = z.infer<typeof patientRegistrationSchema>;
+
+export const patientListFiltersSchema = z.object({
+  search: z.string().trim().max(100).default(""),
+  status: z.nativeEnum(RecordStatus).default(RecordStatus.ACTIVE),
+  page: z.coerce.number().int().min(1).max(10_000).catch(1),
+});

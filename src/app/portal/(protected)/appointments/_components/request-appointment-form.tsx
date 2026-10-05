@@ -16,7 +16,7 @@ import { requestAppointmentAction, type FormState } from "../actions";
 
 type DoctorOption = { id: string; fullName: string; specialization: { name: string } };
 
-export function RequestAppointmentForm({ doctors }: { doctors: DoctorOption[] }) {
+export function RequestAppointmentForm({ doctors, defaultDate }: { doctors: DoctorOption[]; defaultDate: string }) {
   const [state, formAction, isPending] = useActionState<FormState, FormData>(requestAppointmentAction, {
     error: null,
   });
@@ -43,7 +43,7 @@ export function RequestAppointmentForm({ doctors }: { doctors: DoctorOption[] })
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="date">Preferred date</Label>
-          <Input id="date" name="date" type="date" required defaultValue={v?.date} />
+          <Input id="date" name="date" type="date" required defaultValue={v?.date ?? defaultDate} />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="startTime">Preferred time</Label>

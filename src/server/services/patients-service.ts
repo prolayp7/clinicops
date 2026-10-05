@@ -3,7 +3,7 @@ import { patientScope } from "@/lib/permissions/record-scope";
 import crypto from "node:crypto";
 import { Prisma, type RecordStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { assertCan } from "@/lib/permissions/policies";
+import { assertCan, can } from "@/lib/permissions/policies";
 import { formatPatientId, normalizeEmail, normalizePhone } from "@/lib/patients";
 import { recordAuditEvent } from "@/server/services/audit-service";
 import type { CurrentUser } from "@/lib/auth/session";
@@ -21,6 +21,24 @@ export type DuplicateCandidate = {
   dateOfBirth: Date;
   phone: string;
   email: string | null;
+};
+
+export type PatientTimelineType =
+  | "APPOINTMENT"
+  | "CONSULTATION"
+  | "PRESCRIPTION"
+  | "LAB_ORDER"
+  | "DOCUMENT"
+  | "INVOICE";
+
+export type PatientTimelineItem = {
+  id: string;
+  type: PatientTimelineType;
+  occurredAt: Date;
+  title: string;
+  description: string;
+  status: string;
+  href: string;
 };
 
 export class DuplicateWarningError extends Error {
@@ -98,6 +116,18 @@ export async function listPatients(actor: CurrentUser, { search, status, page, p
     prisma.patient.count({ where }),
   ]);
 
+  await Promise.all(
+    items.map((patient) =>
+      recordAuditEvent({
+        actorId: actor.profile.id,
+        actorRole: actor.profile.role,
+        action: "patient.viewed",
+        entityType: "Patient",
+        entityId: patient.id,
+      }),
+    ),
+  );
+
   return { items, total };
 }
 
@@ -119,13 +149,113 @@ export async function getPatientById(actor: CurrentUser, id: string) {
 }
 
 export async function getPatientTimeline(actor: CurrentUser, id: string) {
-  assertCan(actor.profile.role, "audit-logs:view");
-  return prisma.auditLog.findMany({
-    where: { entityType: "Patient", entityId: id },
-    orderBy: { createdAt: "desc" },
-    include: { actor: { select: { fullName: true, role: true } } },
-    take: 100,
+  assertCan(actor.profile.role, "patients:view");
+  const canViewBilling = can(actor.profile.role, "billing:view");
+  const patient = await prisma.patient.findFirst({
+    where: { id, ...patientScope(actor) },
+    select: { id: true },
   });
+  if (!patient) throw new Error("Patient not found.");
+
+  const [appointments, consultations, prescriptions, labOrders, documents, invoices] = await Promise.all([
+    prisma.appointment.findMany({
+      where: { patientId: id },
+      select: { id: true, date: true, startTime: true, reason: true, status: true, doctor: { select: { fullName: true } } },
+      orderBy: [{ date: "desc" }, { startTime: "desc" }],
+      take: 100,
+    }),
+    prisma.consultation.findMany({
+      where: { patientId: id },
+      select: { id: true, createdAt: true, diagnosis: true, status: true, doctor: { select: { fullName: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    }),
+    prisma.prescription.findMany({
+      where: { patientId: id },
+      select: { id: true, prescriptionNumber: true, status: true, issuedAt: true, createdAt: true, doctor: { select: { fullName: true } } },
+      orderBy: [{ issuedAt: "desc" }, { createdAt: "desc" }],
+      take: 100,
+    }),
+    prisma.labOrder.findMany({
+      where: { patientId: id },
+      select: { id: true, orderNumber: true, status: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    }),
+    prisma.document.findMany({
+      where: { patientId: id },
+      select: { id: true, fileName: true, status: true, createdAt: true, category: { select: { name: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    }),
+    canViewBilling
+      ? prisma.invoice.findMany({
+          where: { patientId: id },
+          select: { id: true, invoiceNumber: true, status: true, createdAt: true },
+          orderBy: { createdAt: "desc" },
+          take: 100,
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const events: PatientTimelineItem[] = [
+    ...appointments.map((item) => ({
+      id: item.id,
+      type: "APPOINTMENT" as const,
+      occurredAt: item.date,
+      title: `Appointment with ${item.doctor.fullName}`,
+      description: `${item.startTime.toISOString().slice(11, 16)} UTC · ${item.reason}`,
+      status: item.status,
+      href: `/appointments/${item.id}`,
+    })),
+    ...consultations.map((item) => ({
+      id: item.id,
+      type: "CONSULTATION" as const,
+      occurredAt: item.createdAt,
+      title: `Consultation with ${item.doctor.fullName}`,
+      description: item.diagnosis || "Clinical notes recorded",
+      status: item.status,
+      href: `/consultations/${item.id}`,
+    })),
+    ...prescriptions.map((item) => ({
+      id: item.id,
+      type: "PRESCRIPTION" as const,
+      occurredAt: item.issuedAt ?? item.createdAt,
+      title: `Prescription ${item.prescriptionNumber}`,
+      description: `Prescribed by ${item.doctor.fullName}`,
+      status: item.status,
+      href: `/prescriptions/${item.id}`,
+    })),
+    ...labOrders.map((item) => ({
+      id: item.id,
+      type: "LAB_ORDER" as const,
+      occurredAt: item.createdAt,
+      title: `Lab order ${item.orderNumber}`,
+      description: "Laboratory tests",
+      status: item.status,
+      href: `/laboratory/${item.id}`,
+    })),
+    ...documents.map((item) => ({
+      id: item.id,
+      type: "DOCUMENT" as const,
+      occurredAt: item.createdAt,
+      title: item.fileName,
+      description: item.category.name,
+      status: item.status,
+      href: `/documents?patientId=${id}`,
+    })),
+    ...invoices.map((item) => ({
+      id: item.id,
+      type: "INVOICE" as const,
+      occurredAt: item.createdAt,
+      title: `Invoice ${item.invoiceNumber}`,
+      description: "Billing record",
+      status: item.status,
+      href: `/billing/${item.id}`,
+    })),
+  ];
+
+  return events.sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime()).slice(0, 200);
 }
 
 export async function createPatient(

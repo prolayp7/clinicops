@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
+import { auditLogFiltersSchema, staffListFiltersSchema } from "@/lib/validation/users";
 import { can } from "@/lib/permissions/policies";
 import { roleLabel } from "@/lib/permissions/roles";
 import { listStaff } from "@/server/services/users-service";
@@ -42,7 +43,14 @@ export default async function UsersPage({
 
   const params = await searchParams;
   const tab = params.tab === "activity" && canViewAuditLogs ? "activity" : "staff";
-  const page = Math.max(1, Number(params.page) || 1);
+  const staffFilterResult = staffListFiltersSchema.safeParse(params);
+  const staffFilters = staffFilterResult.success
+    ? staffFilterResult.data
+    : { search: "", role: undefined, status: "ACTIVE" as StaffStatus, page: 1 };
+  const auditFilterResult = auditLogFiltersSchema.safeParse(params);
+  const auditFilters = auditFilterResult.success
+    ? auditFilterResult.data
+    : { search: "", actorRole: undefined, from: undefined, to: undefined, page: 1 };
 
   return (
     <div className="space-y-4">
@@ -69,19 +77,19 @@ export default async function UsersPage({
         <StaffSection
           actor={actor}
           canManage={canManage}
-          search={params.search ?? ""}
-          role={params.role}
-          status={(params.status as StaffStatus | undefined) || "ACTIVE"}
-          page={page}
+          search={staffFilters.search}
+          role={staffFilters.role}
+          status={staffFilters.status}
+          page={staffFilters.page}
         />
       ) : (
         <ActivityLogSection
           actor={actor}
-          search={params.search ?? ""}
-          role={params.role}
-          from={params.from ?? ""}
-          to={params.to ?? ""}
-          page={page}
+          search={auditFilters.search}
+          role={auditFilters.actorRole}
+          from={auditFilters.from ?? ""}
+          to={auditFilters.to ?? ""}
+          page={auditFilters.page}
         />
       )}
     </div>
@@ -99,13 +107,13 @@ async function StaffSection({
   actor: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>;
   canManage: boolean;
   search: string;
-  role: string | undefined;
+  role: Role | undefined;
   status: StaffStatus;
   page: number;
 }) {
   const { items, total } = await listStaff(actor, {
     search,
-    role: role as Role | undefined,
+    role,
     status,
     page,
     pageSize: PAGE_SIZE,
@@ -157,9 +165,12 @@ async function StaffSection({
                   <td className="px-4 py-3">
                     <StaffRowActions
                       staffId={staff.id}
+                      fullName={staff.fullName}
+                      email={staff.email}
                       role={staff.role}
                       status={staff.status}
                       isSelf={staff.id === actor.profile.id}
+                      canManageProtectedAccounts={actor.profile.role === "SUPER_ADMIN"}
                     />
                   </td>
                 )}
@@ -184,14 +195,14 @@ async function ActivityLogSection({
 }: {
   actor: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>;
   search: string;
-  role: string | undefined;
+  role: Role | undefined;
   from: string;
   to: string;
   page: number;
 }) {
   const { items, total } = await listAuditLogs(actor, {
     search,
-    actorRole: role as Role | undefined,
+    actorRole: role,
     from,
     to,
     page,
@@ -227,7 +238,7 @@ async function ActivityLogSection({
                   {log.createdAt.toISOString().replace("T", " ").slice(0, 16)} UTC
                 </td>
                 <td className="text-foreground px-4 py-3">
-                  {log.actor ? log.actor.fullName : "System"}
+                  {log.actor ? log.actor.fullName : log.actorRole === "PATIENT" ? "Patient portal" : "System"}
                   {log.actorRole && (
                     <span className="text-caption text-muted-foreground"> ({roleLabel(log.actorRole)})</span>
                   )}

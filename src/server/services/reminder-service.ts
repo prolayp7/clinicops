@@ -1,5 +1,9 @@
 import "server-only";
 import { prisma } from "@/lib/db/prisma";
+import { getEnv } from "@/lib/env";
+import { clinicDateTimeToUtc, dateToTimeString } from "@/lib/scheduling";
+import { sendMail } from "@/lib/mailer";
+import { getClinicSettings } from "@/server/services/clinic-settings-service";
 
 export type ReminderPayload = {
   to: string;
@@ -9,29 +13,22 @@ export type ReminderPayload = {
   startTime: string;
 };
 
-/** Provider-neutral email boundary. A real deployment swaps in a SendGrid/SES/Resend/etc.
- * implementation here — nothing else in the app needs to change. No paid integration is wired
- * up in this phase. */
+/** Provider-neutral email boundary. The current implementation uses the configured SMTP transport. */
 export interface EmailReminderSender {
   send(payload: ReminderPayload): Promise<void>;
 }
 
-/** Fail closed until a delivery provider is configured. Never log reminder contents. */
-class UnconfiguredEmailReminderSender implements EmailReminderSender {
-  async send(): Promise<void> {
-    throw new Error("Email reminder delivery is not configured.");
-  }
-}
-
-export const emailReminderSender: EmailReminderSender = new UnconfiguredEmailReminderSender();
+export const emailReminderSender: EmailReminderSender = {
+  async send(payload) {
+    await sendMail({
+      to: payload.to,
+      subject: "Appointment reminder",
+      text: `Hello ${payload.patientName},\n\nThis is a reminder of your appointment with ${payload.doctorName} on ${payload.date} at ${payload.startTime}.\n\nPlease contact the clinic if you need to reschedule.`,
+    });
+  },
+};
 
 const REMINDER_LEAD_TIME_MS = 24 * 60 * 60 * 1000;
-
-function appointmentDateTime(date: Date, startTime: Date): Date {
-  const combined = new Date(date);
-  combined.setUTCHours(startTime.getUTCHours(), startTime.getUTCMinutes(), 0, 0);
-  return combined;
-}
 
 /** Queues a reminder job ~24h before the visit. No-ops when the patient has no email on file,
  * since SMS/WhatsApp delivery is explicitly out of scope for this phase. */
@@ -42,9 +39,14 @@ export async function scheduleReminder(appointmentId: string) {
   });
   if (!appointment || !appointment.patient.email) return;
 
-  const scheduledFor = new Date(
-    appointmentDateTime(appointment.date, appointment.startTime).getTime() - REMINDER_LEAD_TIME_MS,
+  const clinicSettings = await getClinicSettings();
+  const timeZone = clinicSettings?.timezone ?? getEnv().CLINIC_TIMEZONE;
+  const appointmentAt = clinicDateTimeToUtc(
+    appointment.date.toISOString().slice(0, 10),
+    dateToTimeString(appointment.startTime),
+    timeZone,
   );
+  const scheduledFor = new Date(appointmentAt.getTime() - REMINDER_LEAD_TIME_MS);
 
   await prisma.appointmentReminder.upsert({
     where: { appointmentId },

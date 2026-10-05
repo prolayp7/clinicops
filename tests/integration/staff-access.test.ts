@@ -3,7 +3,11 @@ import { Role } from "@prisma/client";
 
 vi.mock("server-only", () => ({}));
 
-const db = vi.hoisted(() => ({ staffProfile: { findUnique: vi.fn() } }));
+const db = vi.hoisted(() => ({
+  staffProfile: { findUnique: vi.fn() },
+  patientAccount: { findUnique: vi.fn(), update: vi.fn() },
+  $queryRaw: vi.fn().mockResolvedValue([{ count: 1 }]),
+}));
 vi.mock("@/lib/db/prisma", () => ({ prisma: db }));
 
 const provider = vi.hoisted(() => ({
@@ -12,6 +16,9 @@ const provider = vi.hoisted(() => ({
   signOut: vi.fn(),
 }));
 vi.mock("@/lib/auth/providers", () => ({ authProvider: () => provider }));
+
+const recordAuditEvent = vi.hoisted(() => vi.fn());
+vi.mock("@/server/services/audit-service", () => ({ recordAuditEvent }));
 
 const redirect = vi.hoisted(() =>
   vi.fn((to: string) => {
@@ -23,6 +30,9 @@ vi.mock("@/components/shared/app-shell", () => ({ AppShell: () => null }));
 
 import { getCurrentUser } from "@/lib/auth/session";
 import { loginAction } from "@/app/(auth)/login/actions";
+import { signOutAction } from "@/lib/auth/actions";
+import { portalLoginAction } from "@/app/portal/login/actions";
+import { signOutPortalAction } from "@/app/portal/(protected)/actions";
 import DashboardLayout from "@/app/(dashboard)/layout";
 
 const profile = (over: Record<string, unknown> = {}) => ({
@@ -43,6 +53,7 @@ const loginForm = () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  db.$queryRaw.mockResolvedValue([{ count: 1 }]);
 });
 
 describe("getCurrentUser", () => {
@@ -101,6 +112,64 @@ describe("loginAction", () => {
     provider.signIn.mockResolvedValue({ ok: true, authUserId: "staff-1" });
     db.staffProfile.findUnique.mockResolvedValue(profile());
     await expect(loginAction({ error: null }, loginForm())).rejects.toThrow("REDIRECT:/dashboard");
+    expect(recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actorId: "staff-1",
+      action: "staff.login_succeeded",
+      entityType: "StaffProfile",
+    }));
+  });
+
+  it("blocks staff login when the rate limit is exceeded", async () => {
+    db.$queryRaw.mockResolvedValue([{ count: 11 }]);
+
+    await expect(loginAction({ error: null }, loginForm())).resolves.toEqual({
+      error: "Too many attempts. Try again in a few minutes.",
+    });
+    expect(provider.signIn).not.toHaveBeenCalled();
+  });
+
+  it("audits patient portal login without using the staff actor foreign key", async () => {
+    provider.signIn.mockResolvedValue({ ok: true, authUserId: "patient-account-1" });
+    db.patientAccount.findUnique.mockResolvedValue({ id: "patient-account-1", status: "ACTIVE" });
+
+    await expect(portalLoginAction({ error: null }, loginForm())).rejects.toThrow("REDIRECT:/portal");
+    expect(recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actorId: null,
+      actorRole: Role.PATIENT,
+      action: "patient.login_succeeded",
+      entityType: "PatientAccount",
+      entityId: "patient-account-1",
+    }));
+  });
+
+  it("audits staff logout and redirects after clearing the session", async () => {
+    provider.getAuthUserId.mockResolvedValue("staff-1");
+    db.staffProfile.findUnique.mockResolvedValue(profile());
+
+    await expect(signOutAction()).rejects.toThrow("REDIRECT:/login");
+    expect(provider.signOut).toHaveBeenCalledWith("staff");
+    expect(recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actorId: "staff-1",
+      action: "staff.logged_out",
+    }));
+  });
+
+  it("audits patient portal logout and redirects after clearing the session", async () => {
+    provider.getAuthUserId.mockResolvedValue("patient-account-1");
+    db.patientAccount.findUnique.mockResolvedValue({
+      id: "patient-account-1",
+      status: "ACTIVE",
+      patient: { id: "patient-1" },
+    });
+
+    await expect(signOutPortalAction()).rejects.toThrow("REDIRECT:/portal/login");
+    expect(provider.signOut).toHaveBeenCalledWith("patient");
+    expect(recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actorId: null,
+      actorRole: Role.PATIENT,
+      action: "patient.logged_out",
+      entityId: "patient-account-1",
+    }));
   });
 });
 

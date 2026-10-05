@@ -27,11 +27,17 @@ next.config.mjs sets nosniff, DENY frame policy, no-referrer, HSTS, restricted P
 
 No application-wide distributed rate limiter is implemented. Before release configure and test limits for staff/portal authentication, password recovery, portal appointment requests and signed-download generation. Supabase Auth provider limits alone do not cover server actions or document URL generation. Use a shared store or hosting WAF, not per-process counters; document the key, window, thresholds, Retry-After and provider outage behavior. Password reset UI/flow is currently missing. Verify cookie flags/session expiration in staging and require MFA for privileged operational accounts according to clinic policy.
 
+## Appointment reminders
+
+Reminder email delivery uses `SMTP_URL` and `MAIL_FROM`; configure both as deployment secrets. The sender fails closed if either is unavailable and never logs recipient/message contents. Reminders are queued approximately 24 hours before the appointment using the clinic's IANA timezone; appointments without an email address do not create a reminder. Delivery failures are recorded as `FAILED` for operational review.
+
+`vercel.json` schedules `GET /api/cron/reminders` every 15 minutes. Configure a unique `CRON_SECRET` (at least 32 characters) in the deployment environment; the route requires `Authorization: Bearer <CRON_SECRET>`, returns 503 when the secret is missing, and rejects unauthorized requests. Confirm the hosting plan supports the configured cron frequency. In isolated staging, verify a synthetic due reminder transitions `PENDING` → `SENT`, a simulated SMTP failure becomes `FAILED`, cancellation prevents delivery, and no reminder body or authorization header appears in logs. Do not use real patient data during this verification.
+
 ## Monitoring and audit
 
 No Sentry integration/alert routing is present. Configure a server-side error sink with PII disabled, request bodies/cookies/authorization/query parameters removed, and session replay disabled. Never capture patient pages, clinical notes, uploaded files or signed URLs. Use a synthetic error to verify notification delivery and document the on-call owner. Track error rate, latency, DB pool saturation, backup failures and storage failures with non-identifying metrics.
 
-Prisma query/error logging is disabled to avoid parameter leakage. The reminder sender fails until a provider exists and never logs appointment details. AuditLog writes are append-only in application behavior; database permissions/retention/tamper controls still need verification. Authentication and document-access audit events are incomplete. Do not treat the current audit coverage as complete. Reminder jobs are prepared, but provider delivery/scheduling is not operational.
+Prisma query/error logging is disabled to avoid parameter leakage. Appointment reminder delivery requires the SMTP/cron configuration and staging verification above. AuditLog writes are append-only in application behavior; database permissions/retention/tamper controls still need verification. Do not treat application-level append-only behavior as protection from privileged database changes.
 
 ## Backup and restore drill
 

@@ -1,10 +1,32 @@
 import { describe, expect, it } from "vitest";
+import { dateToIsoDateInTimeZone } from "@/lib/scheduling";
 import {
+  clinicDateTimeToUtc,
   dateRangesOverlap,
   dateToTimeString,
   timeRangesOverlap,
   timeStringToDate,
 } from "@/lib/scheduling";
+
+describe("dateToIsoDateInTimeZone", () => {
+  it("uses the clinic-local date when it differs from UTC near midnight", () => {
+    expect(dateToIsoDateInTimeZone(new Date("2026-10-05T02:30:00.000Z"), "America/New_York")).toBe("2026-10-04");
+  });
+});
+
+describe("clinicDateTimeToUtc", () => {
+  it("converts a clinic wall time to the matching UTC instant", () => {
+    expect(clinicDateTimeToUtc("2026-10-05", "09:00", "America/New_York").toISOString()).toBe(
+      "2026-10-05T13:00:00.000Z",
+    );
+  });
+
+  it("rejects a wall time skipped by the daylight-saving transition", () => {
+    expect(() => clinicDateTimeToUtc("2026-03-08", "02:30", "America/New_York")).toThrow(
+      "does not exist in the clinic timezone",
+    );
+  });
+});
 
 describe("timeStringToDate / dateToTimeString", () => {
   it("round-trips HH:mm through the epoch-anchored Date representation", () => {

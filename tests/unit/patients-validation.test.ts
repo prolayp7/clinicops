@@ -3,6 +3,7 @@ import { Sex } from "@prisma/client";
 import {
   patientClinicalSchema,
   patientDemographicsSchema,
+  patientListFiltersSchema,
   patientRegistrationSchema,
 } from "@/lib/validation/patients";
 
@@ -37,6 +38,11 @@ describe("patientDemographicsSchema", () => {
     expect(
       patientDemographicsSchema.safeParse({ ...valid, dateOfBirth: "06/15/1990" }).success,
     ).toBe(false);
+  });
+
+  it("requires enough phone digits for reliable normalization", () => {
+    expect(patientDemographicsSchema.safeParse({ ...valid, phone: "555-234-8900" }).success).toBe(true);
+    expect(patientDemographicsSchema.safeParse({ ...valid, phone: "++++++++" }).success).toBe(false);
   });
 });
 
@@ -74,5 +80,17 @@ describe("patientRegistrationSchema", () => {
       currentMedications: [],
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("patientListFiltersSchema", () => {
+  it("trims search and validates status and bounded pagination", () => {
+    expect(patientListFiltersSchema.parse({ search: "  Jane ", status: "ARCHIVED", page: "2" })).toEqual({
+      search: "Jane",
+      status: "ARCHIVED",
+      page: 2,
+    });
+    expect(patientListFiltersSchema.safeParse({ status: "UNKNOWN" }).success).toBe(false);
+    expect(patientListFiltersSchema.parse({ page: "invalid" }).page).toBe(1);
   });
 });

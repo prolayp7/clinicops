@@ -53,7 +53,17 @@ export async function listDocuments(actor: CurrentUser, params: ListDocumentsPar
   ]);
 
   const withUrls = await Promise.all(
-    items.map(async (doc) => ({ ...doc, signedUrl: await getDocumentSignedUrl(doc.storagePath) })),
+    items.map(async (doc) => {
+      const signedUrl = await getDocumentSignedUrl(doc.storagePath);
+      await recordAuditEvent({
+        actorId: actor.profile.id,
+        actorRole: actor.profile.role,
+        action: "document.accessed",
+        entityType: "Document",
+        entityId: doc.id,
+      });
+      return { ...doc, signedUrl };
+    }),
   );
 
   return { items: withUrls, total };

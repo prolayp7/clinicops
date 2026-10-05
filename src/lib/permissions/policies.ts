@@ -86,7 +86,7 @@ const POLICY: Record<Action, ReadonlySet<Role>> = {
   "reports:view": new Set([SUPER_ADMIN, ADMIN, ACCOUNTANT]),
   "patients:manage-portal-access": new Set([SUPER_ADMIN, ADMIN, RECEPTIONIST]),
   "users:view": new Set([SUPER_ADMIN, ADMIN]),
-  "users:manage": new Set([SUPER_ADMIN]),
+  "users:manage": new Set([SUPER_ADMIN, ADMIN]),
   "audit-logs:view": new Set([SUPER_ADMIN, ADMIN]),
 };
 

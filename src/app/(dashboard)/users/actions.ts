@@ -3,15 +3,16 @@
 import { revalidatePath } from "next/cache";
 import type { StaffStatus } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth/session";
-import { createStaffSchema, updateStaffRoleSchema } from "@/lib/validation/users";
+import { createStaffSchema, updateStaffProfileSchema, updateStaffRoleSchema } from "@/lib/validation/users";
 import {
   createStaffUser,
   resetStaffPassword,
   setStaffStatus,
+  updateStaffProfile,
   updateStaffRole,
 } from "@/server/services/users-service";
 
-export type StaffFormState = { error: string | null; temporaryPassword?: string };
+export type StaffFormState = { error: string | null; temporaryPassword?: string; saved?: boolean };
 
 async function requireActor() {
   const actor = await getCurrentUser();
@@ -59,6 +60,28 @@ export async function updateStaffRoleAction(
 
   revalidatePath("/users");
   return { error: null };
+}
+
+export async function updateStaffProfileAction(
+  staffId: string,
+  _prev: StaffFormState,
+  formData: FormData,
+): Promise<StaffFormState> {
+  const parsed = updateStaffProfileSchema.safeParse({
+    fullName: formData.get("fullName"),
+    email: formData.get("email"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Check the profile fields." };
+  }
+
+  try {
+    await updateStaffProfile(await requireActor(), staffId, parsed.data);
+    revalidatePath("/users");
+    return { error: null, saved: true };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Could not update the staff profile." };
+  }
 }
 
 export async function toggleStaffStatusAction(staffId: string, nextStatus: StaffStatus) {

@@ -38,3 +38,12 @@ export const saveResultsSchema = z.object({
   items: z.array(labResultItemSchema).min(1),
 });
 export type SaveResultsInput = z.infer<typeof saveResultsSchema>;
+
+export const labOrderListFiltersSchema = z.object({
+  search: z.string().trim().max(100).default(""),
+  status: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.nativeEnum(LabOrderStatus).optional(),
+  ),
+  page: z.coerce.number().int().min(1).max(10_000).catch(1),
+});

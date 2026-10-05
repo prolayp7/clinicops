@@ -3,17 +3,17 @@ import { redirect } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getCurrentUser } from "@/lib/auth/session";
+import { getEnv } from "@/lib/env";
 import { can } from "@/lib/permissions/policies";
+import { dateToIsoDateInTimeZone } from "@/lib/scheduling";
 import { prisma } from "@/lib/db/prisma";
+import { appointmentFiltersSchema } from "@/lib/validation/appointments";
+import { getClinicSettings } from "@/server/services/clinic-settings-service";
 import { listAppointments } from "@/server/services/appointments-service";
 import { AppointmentFilters } from "./_components/appointment-filters";
 import { ListView } from "./_components/list-view";
 import { CalendarView } from "./_components/calendar-view";
 import type { AppointmentStatus } from "@prisma/client";
-
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export default async function AppointmentsPage({
   searchParams,
@@ -27,10 +27,15 @@ export default async function AppointmentsPage({
   const canManage = can(actor.profile.role, "appointments:manage");
 
   const params = await searchParams;
-  const view = params.view === "list" ? "list" : "calendar";
-  const date = params.date || todayIso();
-  const doctorId = params.doctorId || "";
-  const status = params.status as AppointmentStatus | undefined;
+  const parsedFilters = appointmentFiltersSchema.safeParse(params);
+  const filters = parsedFilters.success ? parsedFilters.data : {};
+  const clinicSettings = await getClinicSettings();
+  const timeZone = clinicSettings?.timezone ?? getEnv().CLINIC_TIMEZONE;
+  const today = dateToIsoDateInTimeZone(new Date(), timeZone);
+  const view = filters.view ?? "calendar";
+  const date = filters.date ?? today;
+  const doctorId = filters.doctorId ?? "";
+  const status = filters.status;
 
   const doctors = await prisma.doctor.findMany({
     where: { status: "ACTIVE", ...(doctorId ? { id: doctorId } : {}) },

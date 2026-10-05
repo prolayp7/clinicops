@@ -16,7 +16,14 @@ export const clinicSettingSchema = z.object({
   country: z.string().trim().min(1).max(100),
   phone: z.string().trim().min(7).max(30),
   email: z.string().trim().email(),
-  timezone: z.string().trim().min(1),
+  timezone: z.string().trim().min(1).refine((timeZone) => {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone });
+      return true;
+    } catch {
+      return false;
+    }
+  }, "Enter a valid IANA timezone"),
   currency: z
     .string()
     .trim()

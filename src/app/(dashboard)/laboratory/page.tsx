@@ -6,9 +6,12 @@ import { Card } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
 import { can } from "@/lib/permissions/policies";
 import { listLabOrders } from "@/server/services/lab-orders-service";
+import { labOrderListFiltersSchema } from "@/lib/validation/lab-orders";
 import { LabOrderFilters } from "./_components/lab-order-filters";
 import { LabOrderStatusBadge } from "./_components/lab-order-status-badge";
 import type { LabOrderStatus } from "@prisma/client";
+
+const PAGE_SIZE = 10;
 
 export default async function LaboratoryPage({
   searchParams,
@@ -22,9 +25,18 @@ export default async function LaboratoryPage({
   const canOrder = can(actor.profile.role, "laboratory:manage-orders");
 
   const params = await searchParams;
-  const status = params.status as LabOrderStatus | undefined;
+  const parsedFilters = labOrderListFiltersSchema.safeParse(params);
+  const filters = parsedFilters.success
+    ? parsedFilters.data
+    : { search: "", status: undefined, page: 1 };
 
-  const { items } = await listLabOrders(actor, { status, pageSize: 100 });
+  const { items, total } = await listLabOrders(actor, {
+    search: filters.search,
+    status: filters.status,
+    page: filters.page,
+    pageSize: PAGE_SIZE,
+  });
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="space-y-4">
@@ -45,7 +57,10 @@ export default async function LaboratoryPage({
         )}
       </div>
 
-      <LabOrderFilters status={status ?? ""} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <LabOrderFilters search={filters.search} status={filters.status ?? ""} />
+        <span className="text-caption text-muted-foreground">Showing {items.length} of {total} orders</span>
+      </div>
 
       <Card className="gap-0 overflow-hidden p-0">
         <table className="w-full text-left">
@@ -93,6 +108,37 @@ export default async function LaboratoryPage({
           </tbody>
         </table>
       </Card>
+
+      {totalPages > 1 && (
+        <div className="text-caption text-muted-foreground flex items-center justify-between">
+          <span>Page {filters.page} of {totalPages}</span>
+          <div className="flex gap-1.5">
+            {filters.page <= 1 ? (
+              <Button size="sm" variant="secondary" disabled>Previous</Button>
+            ) : (
+              <Button asChild size="sm" variant="secondary">
+                <Link href={pageHref(params, filters.page - 1)}>Previous</Link>
+              </Button>
+            )}
+            {filters.page >= totalPages ? (
+              <Button size="sm" variant="secondary" disabled>Next</Button>
+            ) : (
+              <Button asChild size="sm" variant="secondary">
+                <Link href={pageHref(params, filters.page + 1)}>Next</Link>
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function pageHref(params: Record<string, string | undefined>, page: number) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (key !== "page" && value) query.set(key, value);
+  }
+  query.set("page", String(page));
+  return `/laboratory?${query.toString()}`;
 }
