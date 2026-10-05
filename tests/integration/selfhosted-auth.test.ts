@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -26,6 +26,10 @@ function hashToken(raw: string): string {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("selfhosted auth provider — signIn", () => {
@@ -62,6 +66,34 @@ describe("selfhosted auth provider — signIn", () => {
       "co_staff_session",
       expect.any(String),
       expect.objectContaining({ httpOnly: true }),
+    );
+  });
+
+  it("keeps session cookies secure by default in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("AUTH_COOKIE_SECURE", undefined);
+    db.staffProfile.findUnique.mockResolvedValue({ id: "staff-1", passwordHash: await hashPassword("correct-password") });
+
+    await selfhostedAuthProvider.signIn("staff", "someone@example.test", "correct-password");
+
+    expect(cookieStore.set).toHaveBeenCalledWith(
+      "co_staff_session",
+      expect.any(String),
+      expect.objectContaining({ secure: true, httpOnly: true }),
+    );
+  });
+
+  it("allows explicitly disabling Secure for an HTTP-only deployment", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("AUTH_COOKIE_SECURE", "false");
+    db.staffProfile.findUnique.mockResolvedValue({ id: "staff-1", passwordHash: await hashPassword("correct-password") });
+
+    await selfhostedAuthProvider.signIn("staff", "someone@example.test", "correct-password");
+
+    expect(cookieStore.set).toHaveBeenCalledWith(
+      "co_staff_session",
+      expect.any(String),
+      expect.objectContaining({ secure: false, httpOnly: true, sameSite: "lax" }),
     );
   });
 

@@ -19,9 +19,13 @@ function hashToken(rawToken: string): string {
 }
 
 function cookieOptions(expiresAt: Date) {
+  const secureOverride = process.env.AUTH_COOKIE_SECURE;
+
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure:
+      secureOverride === "true" ||
+      (secureOverride !== "false" && process.env.NODE_ENV === "production"),
     sameSite: "lax" as const,
     path: "/",
     expires: expiresAt,
